@@ -1,0 +1,146 @@
+.next
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production build
+dist/
+dist-workers/
+build/
+out/
+.next/
+.rsbuild/
+
+# Testing
+coverage/
+*.lcov
+.nyc_output
+
+# Environment variables
+.env*
+!.env.example
+!**/.env*.example
+secrets/
+**/secrets/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Cache
+.cache/
+.pnpm-store/
+.agents/
+.codex/
+.omx/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+node-compile-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Boss search skill assets
+assets/简历/
+assets/boss_search_tasks.json
+/assets/resume-*/
+
+# Local resumes and generated reports
+/简历/
+/resume-*/
+/reports/
+/assets/reports/
+/output/
+/outputs/
+/assets/output/
+/assets/outputs/
+**/report.html
+**/report.json
+**/candidate-report*.html
+**/candidate-report*.json
+**/*简历*.pdf
+**/*简历*.doc
+**/*简历*.docx
+**/*resume*.pdf
+**/*resume*.doc
+**/*resume*.docx
+playwright-report/
+test-results/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Optional files
+*.tgz
+*.gz
+*.zip
+*.tar
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.vercel
+.turbo
+
+# Preview files
+.preview
+.codegraph
+design-qa.md
+
+# Local-only internal materials (not for public repo)
+/docs/GOAI_20260804差距复查与提交冲刺.md
+/docs/GOAI无界应用赛道_差距盘点与达标路径.md
+/docs/视频拍摄前置走查清单.md

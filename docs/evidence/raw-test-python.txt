@@ -1,0 +1,42 @@
+test_approved_cloud_rejects_raw_resume (test_ai_execution_policy.AiExecutionPolicyTests.test_approved_cloud_rejects_raw_resume) ... ok
+test_approved_cloud_requires_https (test_ai_execution_policy.AiExecutionPolicyTests.test_approved_cloud_requires_https) ... ok
+test_missing_and_unknown_modes_fail_closed (test_ai_execution_policy.AiExecutionPolicyTests.test_missing_and_unknown_modes_fail_closed) ... ok
+test_private_endpoint_accepts_only_private_or_exact_allowlisted_host (test_ai_execution_policy.AiExecutionPolicyTests.test_private_endpoint_accepts_only_private_or_exact_allowlisted_host) ... ok
+test_private_endpoint_rejects_known_public_model_host (test_ai_execution_policy.AiExecutionPolicyTests.test_private_endpoint_rejects_known_public_model_host) ... ok
+test_tenant_rules_only_blocks_private_deployment (test_ai_execution_policy.AiExecutionPolicyTests.test_tenant_rules_only_blocks_private_deployment) ... ok
+test_bticket_redirect_is_treated_as_expired_login (test_boss_search_results.BossSearchResultTest.test_bticket_redirect_is_treated_as_expired_login) ... ok
+test_parse_batch_result_uses_final_unified_result (test_boss_search_results.BossSearchResultTest.test_parse_batch_result_uses_final_unified_result) ... ok
+test_partial_failures_still_return_valid_candidates (test_boss_search_results.BossSearchResultTest.test_partial_failures_still_return_valid_candidates) ... ok
+test_zero_candidates_is_a_failed_search (test_boss_search_results.BossSearchResultTest.test_zero_candidates_is_a_failed_search) ... ok
+test_contact_candidate_uses_global_index (test_boss_worker_contact.BossWorkerContactTest.test_contact_candidate_uses_global_index) ... ok
+test_contact_output_dir_rejects_traversal (test_boss_worker_contact.BossWorkerContactTest.test_contact_output_dir_rejects_traversal) ... ok
+test_contact_output_dir_stays_inside_resume_root (test_boss_worker_contact.BossWorkerContactTest.test_contact_output_dir_stays_inside_resume_root) ... ok
+test_external_profile_excludes_identity_company_and_raw_resume (test_candidate_report.CandidateReportCoverageTest.test_external_profile_excludes_identity_company_and_raw_resume) ... ok
+test_partial_resume_data_still_generates_full_report (test_candidate_report.CandidateReportCoverageTest.test_partial_resume_data_still_generates_full_report) ... [report] 本地分析候选人 1/2
+[report] 跳过 李某：缺少结构化简历文本
+ok
+test_build_prompt_uses_custom_style_without_copying_default (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_build_prompt_uses_custom_style_without_copying_default) ... ok
+test_col_letter (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_col_letter) ... ok
+test_consecutive_rows_are_written_in_one_batch (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_consecutive_rows_are_written_in_one_batch) ... ok
+test_dry_run_generates_without_writing (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_dry_run_generates_without_writing) ... ok
+test_locate_columns_defaults_to_h (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_locate_columns_defaults_to_h) ... ok
+test_locate_columns_uses_named_columns (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_locate_columns_uses_named_columns) ... ok
+test_resolve_llm_config_uses_project_environment (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_resolve_llm_config_uses_project_environment) ... ok
+test_worker_auto_detects_second_organization_credential (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_worker_auto_detects_second_organization_credential) ... ok
+test_worker_collects_storage_paths_before_processing (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_worker_collects_storage_paths_before_processing) ... ok
+test_worker_decrypts_node_encryption_format (test_resume_batch_pipeline.ResumeBatchPipelineTests.test_worker_decrypts_node_encryption_format) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.028s
+
+OK
+[信息] 姓名列=A 推荐理由列=C 数据行数=2
+[信息] 匹配到 2 人；未匹配 PDF 0 份；表中缺少 PDF 0 人
+[信息] 待处理 2 人，并发数 2
+[生成] 张三 完成（1/2）
+[生成] 李四 完成（2/2）
+[信息] 生成阶段耗时 0.0s
+[写表] 2 个单元格合并为 1 次调用
+[写表] C2:C3 已写入 2 行
+[信息] 写表阶段耗时 0.0s
+===== 完成 ===== 处理 2 | 写入 2 | 跳过 0 | 失败 0

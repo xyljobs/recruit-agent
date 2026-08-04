@@ -1,0 +1,4 @@
+
+> zhipin-agent@0.1.0 validate .
+> tsc -p tsconfig.json --incremental false && eslint . --quiet
+

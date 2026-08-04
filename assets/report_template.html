@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>__TITLE__</title>
+<style>
+  :root {
+    --bg: #f4f6fa;
+    --card: #ffffff;
+    --text: #1a202c;
+    --text2: #2d3748;
+    --muted: #718096;
+    --muted2: #a0aec0;
+    --border: #e2e8f0;
+    --border2: #edf2f7;
+    --brand: #3182ce;
+    --brand-d: #2c5282;
+    --brand-l: #ebf4ff;
+    --green: #38a169;
+    --green-l: #c6f6d5;
+    --yellow: #dd6b20;
+    --yellow-l: #feebc8;
+    --red: #e53e3e;
+    --red-l: #fed7d7;
+    --gray: #a0aec0;
+    --gray-l: #edf2f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+  }
+
+
+  /* 锚点导航 */
+  .nav {
+    position: sticky; top: 0; z-index: 99;
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+  }
+  .nav-inner {
+    max-width: 1280px; margin: 0 auto; padding: 0 40px;
+    display: flex; gap: 20px; font-size: 13px; align-items: center;
+  }
+  .nav a {
+    color: var(--muted); text-decoration: none; padding: 4px 10px;
+    border-radius: 4px; transition: all .15s;
+  }
+  .nav a:hover { background: var(--brand-l); color: var(--brand-d); }
+  .nav .nav-title {
+    font-weight: 600; color: var(--text); margin-right: auto;
+    font-size: 13px;
+  }
+  .nav .nav-time { color: var(--muted2); font-size: 12px; }
+
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px 40px 100px; }
+
+  /* === Hero === */
+  .hero {
+    background: linear-gradient(135deg, #2c5282 0%, #3182ce 100%);
+    color: white; padding: 28px 32px; border-radius: 10px;
+    margin-bottom: 24px;
+  }
+  .hero h1 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: .3px; }
+  .hero .sub { font-size: 13px; opacity: .9; margin-bottom: 14px; }
+  .hero .jd-line { font-size: 12.5px; opacity: .88; line-height: 1.7;
+    border-top: 1px solid rgba(255,255,255,.18); padding-top: 11px; }
+  .hero .jd-line b { font-weight: 600; opacity: 1; margin-right: 6px; }
+
+  /* === KPI === */
+  .kpis {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 12px;
+  }
+  .kpi {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 14px; text-align: center;
+  }
+  .kpi .num { font-size: 30px; font-weight: 700; color: var(--brand); line-height: 1.05; }
+  .kpi .num.green { color: var(--green); }
+  .kpi .num.yellow { color: var(--yellow); }
+  .kpi .num.gray { color: var(--gray); }
+  .kpi .num.red { color: var(--red); }
+  .kpi .label { font-size: 11.5px; color: var(--muted); margin-top: 6px; letter-spacing: .3px; }
+
+  /* 推荐分布胶囊条 */
+  .dist-bar {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px; margin-bottom: 24px;
+  }
+  .dist-bar h4 { margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .5px; }
+  .dist-track {
+    display: flex; height: 22px; border-radius: 4px; overflow: hidden;
+    background: var(--border2);
+  }
+  .dist-seg {
+    color: white; font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dist-seg.strong { background: var(--green); }
+  .dist-seg.rec { background: var(--brand); }
+  .dist-seg.maybe { background: var(--yellow); }
+  .dist-seg.no { background: var(--gray); }
+  .invalid-note {
+    margin-top: 10px; padding: 8px 12px; font-size: 12.5px;
+    background: #fffaf0; border-left: 3px solid var(--yellow);
+    border-radius: 3px; color: var(--text2);
+  }
+
+  /* === 板块标题 === */
+  .section-title {
+    font-size: 18px; font-weight: 700; margin: 36px 0 14px;
+    padding-left: 11px; border-left: 4px solid var(--brand);
+    line-height: 1.3;
+  }
+  .section-title small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 10px; }
+  .group-title {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    margin: 22px 0 10px; padding-bottom: 6px;
+    border-bottom: 1px dashed var(--border);
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+
+  /* === 批次画像 === */
+  .portrait {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+  }
+  .portrait .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .portrait .panel h5 {
+    margin: 0 0 12px; font-size: 12.5px; color: var(--text2);
+    font-weight: 600; letter-spacing: .3px;
+  }
+  .portrait .panel h5 .hint {
+    font-weight: 400; color: var(--muted2); font-size: 11px; margin-left: 8px;
+  }
+  /* 直方图 */
+  .hist { display: flex; align-items: flex-end; gap: 6px; height: 90px; padding: 0 4px; }
+  .hist .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .hist .bar-col .b {
+    width: 100%; background: linear-gradient(180deg, #63b3ed 0%, var(--brand) 100%);
+    border-radius: 3px 3px 0 0; min-height: 2px; transition: all .2s;
+    position: relative;
+  }
+  .hist .bar-col .b:hover { background: var(--brand-d); }
+  .hist .bar-col .v {
+    font-size: 10px; color: var(--muted); margin-bottom: 2px; height: 14px;
+  }
+  .hist .axis { display: flex; gap: 6px; padding: 6px 4px 0; border-top: 1px solid var(--border); }
+  .hist .axis span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); }
+
+  /* 散点图 */
+  .scatter { width: 100%; height: 180px; }
+  .scatter .axis-line { stroke: var(--border); stroke-width: 1; }
+  .scatter .axis-tick { stroke: var(--border); stroke-width: 1; }
+  .scatter .axis-label { font-size: 10px; fill: var(--muted); }
+  .scatter .grid-line { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 2,3; }
+  .scatter .dot { transition: all .2s; cursor: pointer; }
+  .scatter .dot:hover { r: 7; }
+  .scatter .dot-label { font-size: 9px; fill: var(--text2); pointer-events: none; }
+
+  /* 堆叠条 */
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+  .stack .row { display: grid; grid-template-columns: 70px 1fr 36px; align-items: center; gap: 10px; }
+  .stack .row .lbl { font-size: 11.5px; color: var(--muted); }
+  .stack .row .track { height: 16px; background: var(--border2); border-radius: 3px; overflow: hidden; }
+  .stack .row .track > div { height: 100%; }
+  .stack .row .cnt { font-size: 11.5px; color: var(--text2); text-align: right; font-weight: 600; }
+
+  /* 词频条 */
+  .tagrank { display: flex; flex-direction: column; gap: 5px; }
+  .tagrank .row { display: grid; grid-template-columns: 90px 1fr 28px; gap: 10px; align-items: center; }
+  .tagrank .row .lbl { font-size: 11.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .tagrank .row .track { height: 12px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+  .tagrank .row .track > div { height: 100%; background: linear-gradient(90deg, #63b3ed 0%, var(--brand) 100%); border-radius: 2px; }
+  .tagrank .row .cnt { font-size: 11px; color: var(--muted); text-align: right; }
+
+  /* === 候选人对比矩阵（热力上色） === */
+  .matrix {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .matrix table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .matrix th, .matrix td { padding: 10px 12px; text-align: center; }
+  .matrix thead { background: #f7fafc; }
+  .matrix th {
+    font-size: 10.5px; color: var(--muted); font-weight: 600;
+    letter-spacing: .8px; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .matrix th:nth-child(1), .matrix td:nth-child(1) { text-align: left; padding-left: 16px; }
+  .matrix tbody tr { border-bottom: 1px solid var(--border2); transition: background .15s; cursor: pointer; }
+  .matrix tbody tr:hover { background: #f7fafc; }
+  .matrix tbody tr:last-child { border-bottom: none; }
+  .matrix .name-cell { font-weight: 600; color: var(--text); }
+  .matrix .name-cell .meta-tiny { display: block; font-size: 10.5px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .matrix .heat {
+    display: inline-block; min-width: 36px; padding: 4px 6px;
+    border-radius: 3px; font-weight: 600; font-size: 12.5px;
+  }
+  .matrix .heat.h-hi { background: #c6f6d5; color: #22543d; }
+  .matrix .heat.h-md { background: #feebc8; color: #7c2d12; }
+  .matrix .heat.h-lo { background: #fed7d7; color: #742a2a; }
+  .matrix .heat.h-zr { background: var(--gray-l); color: var(--muted); }
+  .matrix .overall-cell {
+    font-weight: 700; font-size: 17px;
+  }
+  .matrix .badge-mini {
+    font-size: 10px; padding: 2px 7px; border-radius: 3px;
+    color: white; font-weight: 600; letter-spacing: .3px;
+  }
+  .matrix .badge-mini.badge-strong { background: var(--green); }
+  .matrix .badge-mini.badge-rec { background: var(--brand); }
+  .matrix .badge-mini.badge-maybe { background: var(--yellow); }
+  .matrix .badge-mini.badge-no { background: var(--gray); }
+  .matrix .btn-mini {
+    padding: 3px 9px; font-size: 11px; border: 1px solid var(--brand);
+    background: white; color: var(--brand); border-radius: 3px; cursor: pointer;
+    font-family: inherit;
+  }
+  .matrix .btn-mini:hover { background: var(--brand); color: white; }
+  .matrix .btn-mini:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* === 候选人完整卡片 === */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 22px 24px; margin-bottom: 14px;
+    page-break-inside: avoid; scroll-margin-top: 80px;
+  }
+  .card:hover { border-color: #cbd5e0; }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 16px; flex-wrap: wrap;
+  }
+  .card-title { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
+  .meta-line { font-size: 12.5px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .meta-line .item::before {
+    content: ""; display: inline-block; width: 3px; height: 3px;
+    background: var(--muted2); border-radius: 50%; margin-right: 7px;
+    vertical-align: middle; position: relative; top: -2px;
+  }
+
+  /* 推荐徽章 */
+  .badge {
+    display: inline-block; padding: 3px 10px; font-size: 11.5px;
+    border-radius: 3px; font-weight: 600; color: #fff; letter-spacing: .5px;
+  }
+  .badge-strong { background: var(--green); }
+  .badge-rec { background: var(--brand); }
+  .badge-maybe { background: var(--yellow); }
+  .badge-no { background: var(--gray); }
+
+  .btn-open {
+    padding: 7px 15px; background: var(--brand); color: #fff;
+    border: none; border-radius: 4px; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; white-space: nowrap; transition: all .15s;
+    font-family: inherit;
+  }
+  .btn-open:hover { background: var(--brand-d); }
+  .btn-open:disabled { background: var(--gray); cursor: not-allowed; opacity: 0.6; }
+  .btn-open.is-locked, .btn-mini.is-locked { cursor: wait; opacity: 0.5; }
+
+  .one-liner {
+    font-size: 14px; color: var(--text2);
+    margin: 14px 0 12px; padding: 10px 14px;
+    background: var(--brand-l); border-left: 3px solid var(--brand);
+    border-radius: 3px; line-height: 1.6;
+  }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tag {
+    padding: 3px 9px; background: #edf2f7; color: var(--text2);
+    border-radius: 10px; font-size: 11.5px; font-weight: 500;
+  }
+
+  /* 评分区：雷达图 + 横条 */
+  .score-row {
+    display: grid; grid-template-columns: 260px 1fr; gap: 24px;
+    align-items: center; margin-bottom: 14px;
+  }
+  .radar { width: 260px; height: 240px; }
+  .scores-list { font-size: 12.5px; }
+  .score-line {
+    display: grid; grid-template-columns: 70px 1fr 30px;
+    align-items: center; gap: 10px; margin-bottom: 8px;
+  }
+  .score-line .name { color: var(--muted); font-size: 11.5px; }
+  .bar { height: 7px; background: var(--border2); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #63b3ed 0%, var(--brand) 100%); }
+  .score-line .val { font-weight: 600; color: var(--text); text-align: right; font-size: 13px; }
+
+  .overall {
+    display: inline-block; font-size: 24px; font-weight: 700;
+    color: var(--brand); margin-left: 6px; line-height: 1;
+  }
+  .overall.green { color: var(--green); }
+  .overall.yellow { color: var(--yellow); }
+  .overall.gray { color: var(--gray); }
+
+  /* 职业轨迹时间线 */
+  .timeline-block {
+    margin: 14px 0; padding: 12px 14px;
+    background: #fafbfc; border-radius: 6px; border: 1px solid var(--border2);
+  }
+  .timeline-block .tl-title {
+    font-size: 11.5px; color: var(--muted); font-weight: 600;
+    margin-bottom: 8px; letter-spacing: .3px;
+  }
+  .tl-track {
+    display: flex; height: 26px; gap: 2px; border-radius: 3px; overflow: hidden;
+  }
+  .tl-seg {
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 10.5px; font-weight: 500;
+    padding: 0 6px; white-space: nowrap; overflow: hidden;
+    transition: opacity .15s;
+  }
+  .tl-seg:hover { opacity: .85; }
+  .tl-seg.t-big { background: #2c5282; }
+  .tl-seg.t-mid { background: #3182ce; }
+  .tl-seg.t-small { background: #63b3ed; }
+  .tl-seg.t-startup { background: #d69e2e; }
+  .tl-seg.t-gap { background: #cbd5e0; color: #4a5568; }
+  .tl-axis {
+    display: flex; justify-content: space-between; font-size: 10px;
+    color: var(--muted); margin-top: 4px;
+  }
+  .tl-legend {
+    display: flex; gap: 12px; margin-top: 8px; font-size: 10.5px; color: var(--muted);
+  }
+  .tl-legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .tl-legend i {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+  }
+
+  /* 详细分析（默认展开，内部自己看） */
+  .detail {
+    margin-top: 14px; padding: 14px 16px;
+    background: #f7fafc; border-radius: 6px; font-size: 13px;
+    line-height: 1.7;
+  }
+  .detail p { margin: 5px 0; }
+  .detail b { color: var(--text); margin-right: 6px; font-weight: 600; }
+  .detail .match { color: var(--green); }
+  .detail .gap { color: var(--yellow); }
+
+  /* 内嵌完整简历：HTML 脱离桌面程序后仍可查看 */
+  .resume-gallery {
+    margin-top: 14px; border: 1px solid var(--border);
+    border-radius: 6px; background: #fff; overflow: hidden;
+    scroll-margin-top: 80px;
+  }
+  .resume-gallery > summary {
+    cursor: pointer; padding: 12px 16px; color: var(--brand-d);
+    background: var(--brand-l); font-size: 13px; font-weight: 600;
+    user-select: none;
+  }
+  .resume-pages { display: grid; gap: 14px; padding: 14px; background: #f7fafc; }
+  .resume-page { margin: 0; }
+  .resume-page img {
+    display: block; width: 100%; height: auto; background: #fff;
+    border: 1px solid var(--border); border-radius: 5px;
+  }
+  .resume-page figcaption {
+    margin-top: 5px; text-align: center; color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  /* 市场观察（细化版） */
+  .insight-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+  }
+  .insight-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 18px 22px;
+  }
+  .insight-card h5 {
+    margin: 0 0 10px; font-size: 13px; color: var(--brand-d);
+    font-weight: 600; letter-spacing: .3px;
+  }
+  .insight-card p { margin: 6px 0; font-size: 13px; line-height: 1.7; color: var(--text2); }
+  .insight-card.full { grid-column: 1 / -1; background: linear-gradient(135deg, #ebf4ff 0%, #ffffff 100%); }
+  .insight-card.full p { font-size: 13.5px; line-height: 1.85; }
+
+  @media (max-width: 900px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .portrait { grid-template-columns: 1fr; }
+    .insight-grid { grid-template-columns: 1fr; }
+    .score-row { grid-template-columns: 1fr; }
+    .matrix { overflow-x: auto; }
+    .nav-inner { flex-wrap: wrap; }
+  }
+  @media print {
+    .nav, .btn-open, .btn-mini { display: none !important; }
+    .hero { background: var(--brand) !important; -webkit-print-color-adjust: exact; }
+    .matrix .heat { -webkit-print-color-adjust: exact; }
+    .tl-seg { -webkit-print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <span class="nav-title">__TITLE__</span>
+    <a href="#portrait">批次画像</a>
+    <a href="#matrix">对比矩阵</a>
+    <a href="#top">Top 推荐</a>
+    <a href="#all">完整列表</a>
+    <a href="#insight">市场观察</a>
+    <span class="nav-time">__EXEC_TIME__</span>
+  </div>
+</nav>
+<div class="container">
+
+<!-- ====== Hero ====== -->
+<div class="hero">
+  <h1>__TITLE__</h1>
+  <div class="sub">__SUBTITLE__</div>
+  <div class="jd-line"><b>JD 重点：</b>__JD_HIGHLIGHTS__</div>
+</div>
+
+<!-- ====== KPI ====== -->
+<div class="kpis">
+  <div class="kpi"><div class="num">__KPI_TOTAL__</div><div class="label">搜索总数</div></div>
+  <div class="kpi"><div class="num green">__KPI_VALID__</div><div class="label">有效评估</div></div>
+  <div class="kpi"><div class="num green">__KPI_TOP__</div><div class="label">推荐</div></div>
+  <div class="kpi"><div class="num yellow">__KPI_MAYBE__</div><div class="label">可考虑</div></div>
+  <div class="kpi"><div class="num gray">__KPI_NO__</div><div class="label">不推荐</div></div>
+</div>
+
+<!-- ====== 推荐分布条 ====== -->
+<div class="dist-bar">
+  <h4>推荐等级分布 · 关键词：__KEYWORDS__</h4>
+  <div class="dist-track">__DIST_SEGMENTS__</div>
+  __INVALID_NOTE_BLOCK__
+</div>
+
+<!-- ====== 批次画像 ====== -->
+<h2 class="section-title" id="portrait">批次画像 <small>这一批人整体长什么样</small></h2>
+<div class="portrait">
+  <div class="panel">
+    <h5>经验年限分布<span class="hint">单位：人</span></h5>
+    __HIST_YEARS__
+  </div>
+  <div class="panel">
+    <h5>期望薪资 × 经验年限<span class="hint">点的颜色 = 推荐等级</span></h5>
+    __SCATTER_SAL__
+  </div>
+  <div class="panel">
+    <h5>公司层次分布<span class="hint">来自当前/最近就职公司</span></h5>
+    __STACK_TIER__
+  </div>
+  <div class="panel">
+    <h5>高频技术栈 / 标签<span class="hint">Top 10 出现次数</span></h5>
+    __TAG_RANK__
+  </div>
+</div>
+
+<!-- ====== 候选人对比矩阵 ====== -->
+<h2 class="section-title" id="matrix">候选人对比矩阵 <small>点击行跳转到详情；颜色越绿越强、越红越短板</small></h2>
+<div class="matrix">
+  <table>
+    <thead>
+      <tr>
+        <th>候选人</th>
+        <th>等级</th>
+        <th>综合</th>
+        <th>硬性</th>
+        <th>技术</th>
+        <th>业务</th>
+        <th>轨迹</th>
+        <th>稳定</th>
+        <th>潜力</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>__MATRIX_ROWS__</tbody>
+  </table>
+</div>
+
+<!-- ====== Top 推荐 ====== -->
+<h2 class="section-title" id="top">Top 推荐 <small>综合评分前列，建议优先沟通</small></h2>
+__TOP_CARDS__
+
+<!-- ====== 完整候选人列表 ====== -->
+<h2 class="section-title" id="all">完整候选人列表 <small>已在 Top 出现的不重复展示</small></h2>
+
+<div class="group-title">其他推荐 / 可考虑</div>
+__MAYBE_CARDS__
+
+<div class="group-title">不推荐</div>
+__NO_CARDS__
+
+<!-- ====== 市场观察 ====== -->
+<h2 class="section-title" id="insight">市场观察 <small>HR 行动建议</small></h2>
+<div class="insight-grid">
+  <div class="insight-card">
+    <h5>供给结构</h5>
+    <p>__INSIGHT_SUPPLY__</p>
+  </div>
+  <div class="insight-card">
+    <h5>求职意愿</h5>
+    <p>__INSIGHT_INTENT__</p>
+  </div>
+  <div class="insight-card">
+    <h5>薪资水位</h5>
+    <p>__INSIGHT_SALARY__</p>
+  </div>
+  <div class="insight-card">
+    <h5>风险信号</h5>
+    <p>__INSIGHT_RISK__</p>
+  </div>
+  <div class="insight-card full">
+    <h5>下一步动作建议</h5>
+    <p>__INSIGHT_NEXT__</p>
+  </div>
+</div>
+
+</div><!-- container -->
+
+<script>
+function createRadarChart(containerId, scores, labels) {
+  const W = 260, H = 240, cx = W/2, cy = H/2, r = 70;
+  const n = scores.length, step = (2 * Math.PI) / n, start = -Math.PI / 2;
+  let grid = '', axes = '', text = '';
+  for (let lv = 1; lv <= 4; lv++) {
+    let pts = '';
+    for (let i = 0; i < n; i++) {
+      const a = start + i * step, lr = r * lv / 4;
+      pts += `${cx + lr*Math.cos(a)},${cy + lr*Math.sin(a)} `;
+    }
+    grid += `<polygon points="${pts}" fill="none" stroke="#e2e8f0" stroke-width=".5"/>`;
+  }
+  let data = '';
+  for (let i = 0; i < n; i++) {
+    const a = start + i * step;
+    axes += `<line x1="${cx}" y1="${cy}" x2="${cx + r*Math.cos(a)}" y2="${cy + r*Math.sin(a)}" stroke="#e2e8f0" stroke-width=".5"/>`;
+    const v = scores[i] / 100 * r;
+    data += `${cx + v*Math.cos(a)},${cy + v*Math.sin(a)} `;
+    const lx = cx + (r+18)*Math.cos(a), ly = cy + (r+18)*Math.sin(a);
+    const anc = Math.abs(Math.cos(a)) < .1 ? 'middle' : Math.cos(a) > 0 ? 'start' : 'end';
+    text += `<text x="${lx}" y="${ly}" text-anchor="${anc}" dominant-baseline="middle" font-size="10" fill="#718096" font-weight="500">${labels[i]} ${scores[i]}</text>`;
+  }
+  document.getElementById(containerId).innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+      <defs><radialGradient id="rg-${containerId}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#3182ce" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#3182ce" stop-opacity="0.1"/>
+      </radialGradient></defs>
+      ${grid}${axes}
+      <polygon points="${data}" fill="url(#rg-${containerId})" stroke="#3182ce" stroke-width="2"/>
+      ${text}
+    </svg>`;
+}
+
+const labels = ['硬性','技术','业务','轨迹','稳定','潜力'];
+const radarData = __RADAR_DATA__;
+Object.entries(radarData).forEach(([k,v]) => {
+  if (document.getElementById('radar-'+k)) createRadarChart('radar-'+k, v, labels);
+});
+
+// 矩阵行点击跳到对应卡片
+document.querySelectorAll('.matrix tbody tr[data-idx]').forEach(tr => {
+  tr.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    const idx = tr.getAttribute('data-idx');
+    const target = document.getElementById('card-' + idx);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+
+// === 并发拦截：boss 同时开两个 tab 必废，全局只允许一个打开操作 ===
+let RESUME_BUSY = false;
+const RESUME_URL_TEMPLATE = null;
+
+function setAllResumeBtnsDisabled(disabled) {
+  document.querySelectorAll('.btn-open, .btn-mini').forEach(b => {
+    b.disabled = disabled;
+    if (disabled) b.classList.add('is-locked');
+    else b.classList.remove('is-locked');
+  });
+}
+
+async function openResumeTarget(idx) {
+  if (window.pywebview?.api?.open_resume) {
+    return await window.pywebview.api.open_resume(idx);
+  }
+  if (RESUME_URL_TEMPLATE) {
+    const target = RESUME_URL_TEMPLATE.replace('__INDEX__', String(idx));
+    const opened = window.open(target, '_blank', 'noopener');
+    return opened
+      ? { status: 'ok', message: '✓ 已打开' }
+      : { status: 'error', message: '✗ 请允许弹出窗口' };
+  }
+  const embedded = document.getElementById('resume-' + idx);
+  if (embedded) {
+    embedded.open = true;
+    embedded.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return { status: 'ok', message: '✓ 已展开' };
+  }
+  return { status: 'error', message: '✗ 暂无完整简历' };
+}
+
+async function openResume(idx, ev) {
+  ev.stopPropagation();
+  if (RESUME_BUSY) return;  // 并发兜底，理论上按钮已 disabled 不会到这
+  RESUME_BUSY = true;
+
+  const btn = ev.currentTarget || ev.target;
+  const orig = btn.textContent;
+  setAllResumeBtnsDisabled(true);
+  btn.textContent = '打开中…';
+
+  try {
+    const result = await openResumeTarget(idx);
+    const s = result?.status || '';
+    btn.textContent = result?.message || ((s === 'ok') ? '✓ 已打开' : '✗ 请联系助手');
+  } catch (e) {
+    btn.textContent = '✗ 请联系助手';
+  } finally {
+    // 等几秒让用户看到结果，再恢复全部按钮
+    setTimeout(() => {
+      btn.textContent = orig;
+      RESUME_BUSY = false;
+      setAllResumeBtnsDisabled(false);
+    }, 3500);
+  }
+}
+</script>
+</body>
+</html>

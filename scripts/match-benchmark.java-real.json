@@ -1,0 +1,32 @@
+{
+  "job": {
+    "skills_required": ["Java", "Spring Boot", "Spring Cloud", "MyBatis", "Redis", "MQ", "JVM"],
+    "bonus_skills": ["Kafka", "Dubbo", "分布式", "大型互联网产品", "Elasticsearch"],
+    "experience_required": "5年以上",
+    "education_required": "",
+    "location": "杭州",
+    "urgency": "normal"
+  },
+  "candidates": [
+    { "id": "R01", "human_rank": 1, "profile": { "skills": ["Java", "MySQL", "Redis", "Spring Cloud", "Spring Boot", "MyBatis", "Kafka", "Docker", "K8S", "Jenkins"], "experience_years": 6, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.33 } },
+    { "id": "R02", "human_rank": 1, "profile": { "skills": ["Java", "Spring Cloud", "Spring Boot", "MySQL", "Redis", "RocketMQ", "RabbitMQ", "JVM", "DDD", "Drools"], "experience_years": 7, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.29 } },
+    { "id": "R05", "human_rank": 1, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis", "MySQL", "Redis", "RabbitMQ", "JVM", "Nginx", "Nacos"], "experience_years": 7, "education": "本科", "current_city": "杭州", "preferred_locations": ["杭州"], "job_change_frequency": 0.57 } },
+    { "id": "R07", "human_rank": 1, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "Dubbo", "MySQL", "Redis", "RabbitMQ", "Elasticsearch", "Docker", "K8s"], "experience_years": 9, "education": "本科", "current_city": "杭州", "preferred_locations": ["杭州"], "job_change_frequency": 0.33 } },
+    { "id": "R03", "human_rank": 2, "profile": { "skills": ["Java", "Spring Cloud", "Spring Boot", "Dubbo", "MySQL", "Redis", "Kafka", "Elasticsearch", "Docker", "Nginx"], "experience_years": 11, "education": "本科", "current_city": "武汉", "preferred_locations": ["武汉"], "job_change_frequency": 0.45 } },
+    { "id": "R04", "human_rank": 2, "profile": { "skills": ["Java", "JVM", "Spring Boot", "Spring Cloud", "MyBatis", "MySQL", "Redis", "RocketMQ", "Kafka", "Docker"], "experience_years": 10, "education": "本科", "current_city": "北京", "preferred_locations": ["北京"], "job_change_frequency": 0.2 } },
+    { "id": "R06", "human_rank": 2, "profile": { "skills": ["Java", "Spring Cloud", "Spring Boot", "MyBatis", "MySQL", "Redis", "RocketMQ", "MongoDB", "Maven", "Git"], "experience_years": 8, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.38 } },
+    { "id": "R08", "human_rank": 2, "profile": { "skills": ["Java", "JVM", "Redis", "MySQL", "Spring Cloud", "Zookeeper", "Elasticsearch", "RocketMQ", "Docker", "MongoDB"], "experience_years": 6, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.5 } },
+    { "id": "R09", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring MVC", "MyBatis", "MySQL", "Redis", "Maven", "Git", "Linux", "Docker"], "experience_years": 4, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.5 } },
+    { "id": "R10", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis-Plus", "MySQL", "Redis", "RocketMQ", "RabbitMQ", "Docker", "Nacos"], "experience_years": 4, "education": "本科", "current_city": "重庆", "preferred_locations": [], "job_change_frequency": 0.25 } },
+    { "id": "R11", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis", "MySQL", "Redis", "Kafka", "Nacos", "Jenkins", "ELK"], "experience_years": 6, "education": "本科", "current_city": "北京", "preferred_locations": ["北京"], "job_change_frequency": 0.33 } },
+    { "id": "R12", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MySQL", "Redis", "RabbitMQ", "Elasticsearch", "Docker", "K8s", "Nacos"], "experience_years": 4, "education": "大专", "current_city": null, "preferred_locations": [], "job_change_frequency": 0.25 } },
+    { "id": "R13", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Dubbo", "JVM", "Kafka", "Flink", "Spark", "Redis", "Hadoop", "Elasticsearch"], "experience_years": 7, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.29 } },
+    { "id": "R14", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis", "MySQL", "Redis", "RabbitMQ", "Dubbo", "Elasticsearch", "Nacos"], "experience_years": 4, "education": "本科", "salary_min": 12, "salary_max": 15, "current_city": "郑州", "preferred_locations": ["杭州"], "job_change_frequency": 0.25 } },
+    { "id": "R15", "human_rank": 3, "profile": { "skills": ["Java", "JVM", "Spring Boot", "Spring Cloud", "MySQL", "Redis", "Kafka", "RabbitMQ", "Docker", "Kubernetes"], "experience_years": 4, "education": "大专", "current_city": null, "preferred_locations": [], "job_change_frequency": 0 } },
+    { "id": "R16", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "Dubbo", "MySQL", "Redis", "RocketMQ", "Kafka", "Nginx", "MyBatis"], "experience_years": 7, "education": "本科", "salary_min": 16, "salary_max": 20, "current_city": "上海", "preferred_locations": ["杭州"], "job_change_frequency": 0.43 } },
+    { "id": "R17", "human_rank": 3, "profile": { "skills": ["Java", "JVM", "Spring Boot", "Spring Cloud", "Dubbo", "MySQL", "Redis", "Kafka", "Zookeeper", "Nginx"], "experience_years": 5, "education": "本科", "current_city": null, "preferred_locations": [], "job_change_frequency": 0.4 } },
+    { "id": "R18", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis-Plus", "MySQL", "Redis", "RabbitMQ", "Flink", "Spark", "Docker"], "experience_years": 4, "education": "本科", "current_city": "杭州", "preferred_locations": [], "job_change_frequency": 0.25 } },
+    { "id": "R19", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MySQL", "Redis", "MongoDB", "RocketMQ", "Elasticsearch", "Docker", "Linux"], "experience_years": 7, "education": "本科", "current_city": "上海", "preferred_locations": [], "job_change_frequency": 0.43 } },
+    { "id": "R20", "human_rank": 3, "profile": { "skills": ["Java", "Spring Boot", "Spring Cloud", "MyBatis-Plus", "MySQL", "Oracle", "Redis", "Kafka", "Docker", "XXL-JOB"], "experience_years": 6, "education": "大专", "salary_min": 17, "salary_max": 22, "current_city": "上海", "preferred_locations": ["北京"], "job_change_frequency": 0.17 } }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "job": {
+    "skills_required": ["Java", "Spring Boot", "MySQL"],
+    "bonus_skills": ["Docker", "K8s"],
+    "experience_required": "3年以上",
+    "education_required": "本科及以上",
+    "salary_min": 15,
+    "salary_max": 25,
+    "location": "杭州",
+    "urgency": "normal"
+  },
+  "candidates": [
+    {
+      "id": "c1",
+      "human_rank": 1,
+      "profile": {
+        "skills": ["Java", "Spring Boot", "MySQL", "Docker"],
+        "experience_years": 5,
+        "education": "本科",
+        "salary_min": 18,
+        "salary_max": 24,
+        "current_city": "杭州",
+        "availability": "1week",
+        "job_change_frequency": 0.25
+      }
+    },
+    {
+      "id": "c2",
+      "human_rank": 2,
+      "profile": {
+        "skills": ["Java", "Spring Cloud", "Redis"],
+        "experience_years": 4,
+        "education": "本科",
+        "salary_min": 16,
+        "salary_max": 25,
+        "current_city": "杭州",
+        "availability": "2weeks",
+        "job_change_frequency": 0.5
+      }
+    },
+    {
+      "id": "c3",
+      "human_rank": 3,
+      "profile": {
+        "skills": ["Java", "MySQL"],
+        "experience_years": 3,
+        "education": "大专",
+        "salary_min": 15,
+        "salary_max": 22,
+        "current_city": "杭州",
+        "availability": "1month",
+        "job_change_frequency": 1.0
+      }
+    },
+    {
+      "id": "c4",
+      "human_rank": 4,
+      "profile": {
+        "skills": ["Python", "Django"],
+        "experience_years": 4,
+        "education": "本科",
+        "salary_min": 15,
+        "salary_max": 22,
+        "current_city": "杭州",
+        "availability": "immediately",
+        "job_change_frequency": 0.5
+      }
+    },
+    {
+      "id": "c5",
+      "human_rank": 5,
+      "profile": {
+        "skills": ["Java", "Spring Boot"],
+        "experience_years": 2,
+        "education": "本科",
+        "salary_min": 26,
+        "salary_max": 35,
+        "current_city": "上海",
+        "availability": "1month",
+        "job_change_frequency": 1.5
+      }
+    },
+    {
+      "id": "c6",
+      "human_rank": 6,
+      "profile": {
+        "skills": ["Vue", "React"],
+        "experience_years": 1,
+        "education": "大专",
+        "salary_min": 10,
+        "salary_max": 14,
+        "current_city": "杭州",
+        "availability": "immediately",
+        "job_change_frequency": 2.0
+      }
+    }
+  ]
+}

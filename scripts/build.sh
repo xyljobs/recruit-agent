@@ -1,0 +1,8 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+corepack pnpm install --frozen-lockfile
+corepack pnpm build

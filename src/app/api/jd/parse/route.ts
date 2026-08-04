@@ -1,0 +1,177 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { AiExecutionPolicyError } from '@/lib/ai/execution-policy';
+import { createTenantAiExecutionGateway } from '@/lib/ai/gateway';
+import { getTenantRequestContext } from '@/lib/auth-server';
+import { JD_JSON_BODY_LIMIT, jdParseBodySchema, parseLimitedJson } from '@/lib/api-limits';
+import { apiErrorResponse } from '@/lib/api-response';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
+
+const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职位描述(JD)并提取关键信息。
+
+请分析以下职位描述，提取并结构化以下信息：
+
+## 基础信息
+1. 职位名称 (title)
+2. 所属部门 (department)
+3. 工作地点 (location)
+4. 薪资范围 (salary_range) - 同时提取最低和最高薪资数值
+5. 经验要求 (experience_required)
+6. 学历要求 (education_required)
+
+## 技能要求（关键字段）
+7. 必需技能 (skills_required) - 数组格式，JD明确要求的技能
+8. 加分技能 (bonus_skills) - 数组格式，JD中提到"优先"、"加分"、"最好有"的技能
+
+## 岗位详情
+9. 岗位职责 (responsibilities) - 数组格式
+10. 福利待遇 (benefits) - 数组格式
+11. 紧急程度 (urgency) - 枚举值: urgent(紧急)/high(较高)/normal(常规)
+
+## 智能分析（关键字段）
+12. 隐含需求 (implicit_requirements) - 数组格式，从JD中推断出的未明确说明的需求
+    例如："有大型项目经验" → 需要3年以上经验、有架构能力
+         "抗压能力强" → 可能加班多，需要强调成长空间
+         "熟悉微服务" → 需要Spring Cloud + Docker + 服务治理经验
+13. 完整度 (completeness) - 0-100分，JD信息的完整程度
+14. 缺失字段 (missing_fields) - 数组格式，JD中缺失的重要字段名称
+
+请以JSON格式返回结果，格式如下：
+{
+  "title": "职位名称",
+  "department": "部门",
+  "location": "地点",
+  "salary_range": "薪资范围",
+  "salary_min": 最低薪资数值,
+  "salary_max": 最高薪资数值,
+  "experience_required": "经验要求",
+  "education_required": "学历要求",
+  "skills_required": ["必需技能1", "必需技能2"],
+  "bonus_skills": ["加分技能1", "加分技能2"],
+  "responsibilities": ["职责1", "职责2"],
+  "benefits": ["福利1", "福利2"],
+  "urgency": "normal",
+  "implicit_requirements": ["隐含需求1", "隐含需求2"],
+  "completeness": 85,
+  "missing_fields": ["缺失字段1"]
+}
+
+注意：
+- 如果JD中未提及某项信息，该字段返回null
+- 技能要求要细化，区分必需技能和加分技能
+- 隐含需求要基于行业经验合理推断，不要过度解读
+- 完整度评估标准：基础信息完整50% + 技能要求完整20% + 职责清晰20% + 薪资福利10%
+
+JD内容：
+`;
+
+export async function POST(request: NextRequest) {
+  try {
+    const { supabase, user } = await getTenantRequestContext(request);
+    await enforceRateLimit(supabase, RATE_LIMITS.jdParse);
+    const { jdContent } = await parseLimitedJson(
+      request,
+      jdParseBodySchema,
+      JD_JSON_BODY_LIMIT,
+    );
+
+    const aiGateway = await createTenantAiExecutionGateway(
+      supabase,
+      user.organizationId,
+      request.headers,
+    );
+    aiGateway.requireModel();
+
+    // 使用流式输出解析JD
+    const prompt = JD_PARSE_PROMPT + jdContent;
+
+    const messages = [
+      { role: 'user' as const, content: prompt }
+    ];
+
+    let fullResponse = '';
+    const stream = aiGateway.stream(messages, {
+      model: aiGateway.policy.modelName ?? undefined,
+      temperature: 0.3,
+    });
+
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        fullResponse += chunk.content.toString();
+      }
+    }
+
+    // 解析JSON响应
+    let parsedResult;
+    try {
+      // 提取JSON部分（去除可能的markdown代码块）
+      const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedResult = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('无法从响应中提取JSON');
+      }
+    } catch {
+      console.error('JD解析失败，原始响应:', fullResponse);
+      return NextResponse.json(
+        { error: 'JD解析失败，请检查JD格式' },
+        { status: 500 }
+      );
+    }
+
+    // 保存到数据库
+    const { data, error } = await supabase
+      .from('job_requirements')
+      .insert({
+        organization_id: user.organizationId,
+        owner_user_id: user.userId,
+        title: parsedResult.title || '未命名职位',
+        department: parsedResult.department,
+        location: parsedResult.location,
+        salary_range: parsedResult.salary_range,
+        salary_min: parsedResult.salary_min || null,
+        salary_max: parsedResult.salary_max || null,
+        experience_required: parsedResult.experience_required,
+        education_required: parsedResult.education_required,
+        skills_required: parsedResult.skills_required || [],
+        bonus_skills: parsedResult.bonus_skills || [],
+        responsibilities: parsedResult.responsibilities,
+        benefits: parsedResult.benefits,
+        urgency: parsedResult.urgency || 'normal',
+        implicit_requirements: parsedResult.implicit_requirements || [],
+        completeness: parsedResult.completeness || null,
+        missing_fields: parsedResult.missing_fields || [],
+        raw_jd: jdContent,
+        status: 'active',
+        activated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('保存JD失败:', error);
+      return NextResponse.json(
+        { error: '保存JD失败' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: data.id,
+        ...parsedResult,
+        created_at: data.created_at,
+      }
+    });
+
+  } catch (error) {
+    console.error('JD解析API错误:', error);
+    if (error instanceof AiExecutionPolicyError) {
+      return NextResponse.json(
+        { success: false, error: error.message, code: error.code },
+        { status: 503 },
+      );
+    }
+    return apiErrorResponse(error, '服务器内部错误');
+  }
+}

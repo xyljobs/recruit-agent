@@ -1,0 +1,66 @@
+# Secrets and local configuration
+.env*
+**/.env*
+secrets
+**/secrets
+
+# Version-control metadata
+.git
+.git/**
+
+# Dependencies and build output
+node_modules
+**/node_modules
+.next
+**/.next
+.pnpm-store
+**/.pnpm-store
+dist
+dist-workers
+build
+out
+.turbo
+coverage
+*.tsbuildinfo
+
+# Tool and language caches
+.cache
+**/.cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+
+# Local resumes and generated reports
+assets/简历
+简历
+assets/resume-*
+resume-*
+reports
+**/reports
+output
+outputs
+assets/output
+assets/outputs
+**/report.html
+**/report.json
+**/candidate-report*.html
+**/candidate-report*.json
+**/*简历*.pdf
+**/*简历*.doc
+**/*简历*.docx
+**/*resume*.pdf
+**/*resume*.doc
+**/*resume*.docx
+**/playwright-report
+**/test-results
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.tmp
+.temp

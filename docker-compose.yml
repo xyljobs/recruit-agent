@@ -1,0 +1,88 @@
+services:
+  app:
+    build:
+      context: .
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
+      SUPABASE_ANON_KEY_FILE: /run/secrets/SUPABASE_ANON_KEY
+      SUPABASE_SERVICE_ROLE_KEY_FILE: /run/secrets/SUPABASE_SERVICE_ROLE_KEY
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_API_KEY_FILE: /run/secrets/LLM_API_KEY
+      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      AI_EXECUTION_MODE: ${AI_EXECUTION_MODE:-rules_only}
+      PRIVATE_LLM_BASE_URL: ${PRIVATE_LLM_BASE_URL:-}
+      APPROVED_CLOUD_LLM_BASE_URL: ${APPROVED_CLOUD_LLM_BASE_URL:-}
+      APPROVED_CLOUD_PROCESSORS: ${APPROVED_CLOUD_PROCESSORS:-}
+      AI_PRIVATE_ENDPOINT_CONFIRMED: ${AI_PRIVATE_ENDPOINT_CONFIRMED:-false}
+      ENCRYPTION_KEY_FILE: /run/secrets/ENCRYPTION_KEY
+      HMAC_KEY_FILE: /run/secrets/HMAC_KEY
+      JWT_SECRET_FILE: /run/secrets/JWT_SECRET
+      SUPABASE_JWT_SECRET_FILE: /run/secrets/SUPABASE_JWT_SECRET
+      APP_URL: ${APP_URL:?APP_URL is required}
+      ALLOW_EXTERNAL_RESUME_ANALYSIS: ${ALLOW_EXTERNAL_RESUME_ANALYSIS:-false}
+      ALLOW_EXTERNAL_RESUME_BATCH_ANALYSIS: ${ALLOW_EXTERNAL_RESUME_BATCH_ANALYSIS:-false}
+      CANDIDATE_REPORT_MODE: ${CANDIDATE_REPORT_MODE:-local}
+      RESUME_VL_MODEL: ${RESUME_VL_MODEL:-qwen-vl-max}
+      BOSS_RESUME_DIR: ${BOSS_RESUME_DIR:-}
+    secrets:
+      - SUPABASE_ANON_KEY
+      - SUPABASE_SERVICE_ROLE_KEY
+      - LLM_API_KEY
+      - ENCRYPTION_KEY
+      - HMAC_KEY
+      - JWT_SECRET
+      - SUPABASE_JWT_SECRET
+    ports:
+      - "${PORT:-5000}:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+  match-worker:
+    build:
+      context: .
+    command: ["node", "dist-workers/match-batch-worker.js"]
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
+      SUPABASE_ANON_KEY_FILE: /run/secrets/SUPABASE_ANON_KEY
+      SUPABASE_SERVICE_ROLE_KEY_FILE: /run/secrets/SUPABASE_SERVICE_ROLE_KEY
+      ENCRYPTION_KEY_FILE: /run/secrets/ENCRYPTION_KEY
+    secrets:
+      - SUPABASE_ANON_KEY
+      - SUPABASE_SERVICE_ROLE_KEY
+      - ENCRYPTION_KEY
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+  integration-worker:
+    build:
+      context: .
+    command: ["node", "dist-workers/integration-outbox-worker.js"]
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
+      SUPABASE_ANON_KEY_FILE: /run/secrets/SUPABASE_ANON_KEY
+      SUPABASE_SERVICE_ROLE_KEY_FILE: /run/secrets/SUPABASE_SERVICE_ROLE_KEY
+      ENCRYPTION_KEY_FILE: /run/secrets/ENCRYPTION_KEY
+      INTEGRATION_OUTBOUND_ALLOWED_HOSTS: ${INTEGRATION_OUTBOUND_ALLOWED_HOSTS:-}
+    secrets:
+      - SUPABASE_ANON_KEY
+      - SUPABASE_SERVICE_ROLE_KEY
+      - ENCRYPTION_KEY
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+secrets:
+  SUPABASE_ANON_KEY:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/SUPABASE_ANON_KEY
+  SUPABASE_SERVICE_ROLE_KEY:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/SUPABASE_SERVICE_ROLE_KEY
+  LLM_API_KEY:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/LLM_API_KEY
+  ENCRYPTION_KEY:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/ENCRYPTION_KEY
+  HMAC_KEY:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/HMAC_KEY
+  JWT_SECRET:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/JWT_SECRET
+  SUPABASE_JWT_SECRET:
+    file: ${DOCKER_SECRETS_DIR:-./secrets}/SUPABASE_JWT_SECRET

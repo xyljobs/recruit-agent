@@ -1,0 +1,10 @@
+
+> zhipin-agent@0.1.0 test:db .
+> node scripts/test-database.mjs
+
+database checkpoint: fixture seeded
+database checkpoint: event replay verified
+database checkpoint: integration import verified
+database checkpoint: worker RPC and performance data verified
+performance envelope passed: {"shortlist_submission_p95_ms":3.3267000000000735,"outcome_write_p95_ms":3.2815999999997985,"shortlist_metric_materialization_read_p95_ms":7.5841999999997824}
+database migration, RLS, state, idempotency, integration and cleanup checks passed

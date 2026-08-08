@@ -22,7 +22,7 @@
     "worker:match:once": "tsx scripts/match-batch-worker.ts --once",
     "worker:integration": "tsx scripts/integration-outbox-worker.ts",
     "worker:integration:once": "tsx scripts/integration-outbox-worker.ts --once",
-    "worker:build": "tsup scripts/match-batch-worker.ts scripts/integration-outbox-worker.ts --format cjs --platform node --out-dir dist-workers --clean"
+    "worker:build": "tsup --config tsup.workers.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",

@@ -224,6 +224,8 @@ POOLER_TENANT_ID=zhipin
 
 `generate-keys.sh` 不带 `--update-env` 时只会把结果打印到终端，不会更新 `.env`，因此首次安装必须保留上面的参数。`add-new-auth-keys.sh` 需要 Node.js 16 或更高版本；第 2 步已安装 Node。生成后只检查变量是否已设置，不要把密钥值复制到聊天或普通日志。
 
+> ⚠️ 本项目兼容注意：`add-new-auth-keys.sh` 会向 `.env` 写入 `JWT_JWKS`，使 PostgREST 改用非对称密钥集校验 JWT；而智聘 Agent 服务端 RLS 令牌当前仍以 legacy `JWT_SECRET` 做 HS256 签名，校验将失败，表现为登录后接口 401 / “用户不存在”。若运行了该脚本，必须从 `.env` 删除 `JWT_JWKS` 行（或把 `PGRST_JWT_SECRET` 显式设为 `${JWT_SECRET}`），再 `docker compose up -d rest` 生效。若不需要新版 publishable keys，可跳过 `add-new-auth-keys.sh`，只运行 `generate-keys.sh`。
+
 可以在 Mac mini 本机用下面的命令查看应用需要的凭证，但它会同时显示 PostgreSQL、Dashboard、API 和 S3 的有效凭据。只逐项写入目标配置文件，不要整段复制、截图，或把输出粘贴到聊天、工单和日志中：
 
 ```bash

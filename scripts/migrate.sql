@@ -334,21 +334,37 @@ BEGIN
   SELECT
     CASE p_scope
       WHEN 'candidates:list' THEN 120
+      WHEN 'candidates:search' THEN 120
       WHEN 'jd:parse' THEN 10
       WHEN 'boss:keywords' THEN 10
       WHEN 'boss:execute' THEN 10
       WHEN 'match:batch:submit' THEN 10
       WHEN 'match:batch:status' THEN 120
+      WHEN 'match:single' THEN 10
       WHEN 'dashboard:read' THEN 120
+      WHEN 'outcomes:create' THEN 30
+      WHEN 'communication-briefs:create' THEN 20
+      WHEN 'shortlists:create' THEN 10
+      WHEN 'shortlists:read' THEN 120
+      WHEN 'shortlists:qualify' THEN 10
+      WHEN 'shortlists:decision' THEN 30
     END,
     CASE p_scope
       WHEN 'candidates:list' THEN 60
+      WHEN 'candidates:search' THEN 60
       WHEN 'jd:parse' THEN 300
       WHEN 'boss:keywords' THEN 300
       WHEN 'boss:execute' THEN 60
       WHEN 'match:batch:submit' THEN 60
       WHEN 'match:batch:status' THEN 60
+      WHEN 'match:single' THEN 60
       WHEN 'dashboard:read' THEN 60
+      WHEN 'outcomes:create' THEN 60
+      WHEN 'communication-briefs:create' THEN 60
+      WHEN 'shortlists:create' THEN 60
+      WHEN 'shortlists:read' THEN 60
+      WHEN 'shortlists:qualify' THEN 60
+      WHEN 'shortlists:decision' THEN 60
     END
   INTO v_limit, v_window_seconds;
 
@@ -1858,7 +1874,8 @@ GRANT SELECT (
   last_login_at,
   created_at,
   updated_at,
-  must_change_password
+  must_change_password,
+  mfa_enabled
 ) ON users TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   organization_invitations,

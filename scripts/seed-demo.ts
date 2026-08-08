@@ -247,6 +247,50 @@ const demoJobs = [
     status: 'active',
   },
   {
+    title: 'PLC 电控工程师',
+    department: '设备动力部',
+    location: '杭州',
+    salary_range: '15-25K',
+    salary_min: 15,
+    salary_max: 25,
+    experience_required: '3年以上产线电气调试经验',
+    education_required: '大专及以上学历，电气自动化、机电一体化专业优先',
+    skills_required: ['PLC编程', '电气调试', '伺服驱动', 'PROFINET'],
+    bonus_skills: ['EPLAN', '工业机器人', '触摸屏'],
+    responsibilities: [
+      '负责新产线电气调试与验收',
+      '现有产线 PLC 程序维护与优化',
+      '设备预防性维护计划制定与执行',
+    ],
+    benefits: ['五险一金', '倒班津贴', '免费宿舍'],
+    urgency: 'urgent',
+    implicit_requirements: ['需适应产线爬坡期倒班与值班（隐含）', '有整车或零部件厂现场调试经验优先'],
+    completeness: 78,
+    missing_fields: ['倒班安排', '值班频率', '汇报对象'],
+    raw_jd: `【招聘岗位】
+职位名称：PLC 电控工程师
+部门：设备动力部
+工作地点：杭州
+薪资范围：15-25K
+
+【岗位要求】
+1. 大专及以上学历，电气自动化、机电一体化专业优先
+2. 3年以上产线电气调试经验
+3. 精通西门子或三菱 PLC 编程，熟悉 PROFINET / Modbus
+4. 熟悉伺服驱动、变频器、触摸屏等应用调试
+
+【岗位职责】
+1. 负责新产线电气调试与验收
+2. 现有产线 PLC 程序维护与优化
+3. 设备预防性维护计划制定与执行
+
+【福利待遇】
+- 五险一金
+- 倒班津贴
+- 免费宿舍`,
+    status: 'active',
+  },
+  {
     title: 'Java后端开发',
     department: '研发中心',
     location: '杭州',
@@ -422,6 +466,7 @@ async function seedDemoData() {
       .insert({
         ...job,
         organization_id: organizationId,
+        activated_at: new Date().toISOString(),
       });
 
     if (!error) {

@@ -6,36 +6,39 @@ on:
   pull_request:
 
 jobs:
-  validate:
-    name: TypeScript + ESLint + 单元测试
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: 类型检查 + Lint
+      - name: Validate (tsc + eslint)
         run: pnpm validate
 
-      - name: 单元测试
+      - name: Unit tests
         run: pnpm test:unit
 
-  worker-tests:
-    name: Python Worker 测试
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Database integration tests (temporary PostgreSQL via docker compose)
+        run: pnpm test:db
 
-      - uses: astral-sh/setup-uv@v3
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
 
-      - name: Worker 单元测试
+      - name: Python worker tests
         working-directory: assets
-        run: uv run python -m unittest discover -s tests -v
+        run: uv run --locked python -m unittest discover -s tests -v

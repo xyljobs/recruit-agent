@@ -1,6 +1,6 @@
 # 智聘Agent
 
-![CI](https://github.com/xyljobs/zhipin-agent/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/github/license/xyljobs/zhipin-agent)
+![CI](https://github.com/xyljobs/recruit-agent/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/github/license/xyljobs/recruit-agent)
 
 基于 Next.js 16 的企业私有部署招聘决策副驾驶，面向工业制造与 IT 外包等人力密集行业的人才供应链场景。系统接入现有 ATS 或已授权简历源，帮助 HR 生成可解释短名单、记录人工判断、准备沟通并用真实招聘结果持续校准。它不是完整 ATS，也不会自动拒绝、发 Offer 或录用候选人。
 

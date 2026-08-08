@@ -84,6 +84,22 @@ cd assets && uv run --locked python -m unittest discover -s tests -v
 
 数据库测试会使用仓库自带的临时 PostgreSQL 配置，覆盖迁移幂等、RLS、完整决策流程、真实导入、原子回写、最强清理和 100 候选人性能包络，不依赖开发者数据库凭证。
 
+## 产品截图
+
+截图来自 `docker compose` 从零复现环境（合成种子数据，已脱敏）。
+
+候选人短名单：证据、缺失信息、证据完整度与人工决策留痕。
+
+![候选人短名单](docs/images/readme-shortlists.png)
+
+数据源与 AI 执行边界：默认纯规则、租户级审批、自动降级提示。
+
+![数据源与 AI 执行边界](docs/images/readme-data-sources.png)
+
+职位与标准：纯规则模式可手工定义职位标准，AI 解析仅在批准模式可用。
+
+![职位与标准](docs/images/readme-jobs.png)
+
 ## 核心工作流与指标
 
 1. 在“职位与标准”确认岗位要求并发起短名单。
@@ -129,6 +145,18 @@ AI 分数只参与排序。每条推荐保存版本化置信度拆解、结构�
 - 部署模式只是能力上限；每个租户还须在“数据源”页由管理员逐项批准后方可启用，未批准自动降级为 `rules_only`。
 - 知识库完全本地：`assets/` 下 Markdown 分块检索，无外部检索服务。
 
+## 第三方依赖与外部服务披露
+
+开源依赖以 `pnpm-lock.yaml` 与 `assets/uv.lock` 为准。主要有：Next.js / React / Radix UI / Tailwind CSS（MIT）、openai SDK（Apache-2.0）、supabase-js（MIT）；Python Worker 侧 cryptography、pdfplumber（MIT）、requests（Apache-2.0）、supabase（MIT）等，其中 PyMuPDF 为 AGPL-3.0/商业双许可，仅用于扫描版 PDF 的本地渲染，运行在部署方机器、不进入 Web 端构建。
+
+外部服务仅以下三类，无其他隐蔽调用：
+
+| 服务 | 调用环节 | 费用假设 | 权限与边界 | 可替代性 / 锁定风险 |
+|---|---|---|---|---|
+| 阿里云百炼（OpenAI 兼容端点，默认 qwen-plus / qwen-vl-max） | JD 解析、单人深度匹配、话术生成、扫描版 PDF 视觉结构化（默认关闭） | 部署方自有 API Key、按 token 计费；系统不代收代付 | approved_cloud 下仅发送去标识化载荷，需部署级 + 租户级双重审批 | 任意 OpenAI 兼容端点经 `LLM_BASE_URL` / `LLM_MODEL` 可切换；rules_only 完全不调模型，锁定风险低 |
+| Boss 直聘 | 本地 Worker 外部寻源 | 无 API 费用，使用部署方自有平台账号 | HR 本人扫码登录、本地执行，系统不存平台凭证；不调用非官方 API，预留官方 API 接入位 | 搜索 Agent 可整体移除，回退内部简历库 |
+| 钉钉 MCP（可选） | 简历批处理写回 | 依赖部署方自有钉钉应用 | 默认关闭，需管理员显式配置 | 可选通道，不影响主流程 |
+
 ## 质量门禁
 
 ```bash
@@ -156,10 +184,17 @@ GitHub Actions 对每次推送运行 `validate` + 单元测试 + Python Worker �
 - [docs/Mac-mini-M4数据库安装步骤.md](docs/Mac-mini-M4数据库安装步骤.md) — 自托管 Supabase 安装
 - [docs/简历批处理与钉钉写回部署说明.md](docs/简历批处理与钉钉写回部署说明.md)
 - [docs/Boss结构化简历与candidate-analysis报告方案.md](docs/Boss结构化简历与candidate-analysis报告方案.md)
-- [docs/GOAI参赛说明_无界应用.md](docs/GOAI参赛说明_无界应用.md) — GOAI 无界应用赛道参赛说明（目标用户/闭环/架构/合规）
+- [docs/GOAI参赛说明_无界应用.md](docs/GOAI参赛说明_无界应用.md) — GOAI 无界应用赛道参赛说明（目标用户/闭环/架构/合规/Agent 自证）
+- [docs/GOAI作品简介_500字.md](docs/GOAI作品简介_500字.md) — 初赛提交用作品简介（≤500 字）
+- [docs/GOAI无界应用_方案PPT.pptx](docs/GOAI无界应用_方案PPT.pptx) — 初赛方案 PPT
 - [docs/数据合规与隐私白皮书.md](docs/数据合规与隐私白皮书.md) — 数据合规与隐私保护全文
 - [docs/评测报告_2026-08.md](docs/评测报告_2026-08.md) — 真实数据评测：Spearman 0.706、强推召回率@10 4/4（可复现）
 - [docs/evidence/README.md](docs/evidence/README.md) — 运行证据与质量门禁证据包
+- [docs/evidence/从零复现演练_2026-08-05.md](docs/evidence/从零复现演练_2026-08-05.md) — Docker 全链路从零复现演练与回归修复记录
+
+## 项目来源与已有基础
+
+本项目前身为团队 2025 年火山杯参赛原型（初版基于第三方 Agent 平台 Coze 搭建）。当前仓库为同一团队的完全重构迭代：去除平台 SDK、改为自托管 Next.js + Supabase 架构，并新增 AI 执行边界治理、短名单决策留痕、结果复盘校准等体系化能力；代码全部自研，不含第三方专有代码。旧版参赛材料中的场景调研与量化分析延续至文档并已用真实数据重新验证（见评测报告）。仓库自初始提交即以 Apache-2.0 许可，权利人同为团队成员，无许可兼容问题。
 
 ## 开源许可
 

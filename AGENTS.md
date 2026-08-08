@@ -198,14 +198,14 @@ uv run boss_worker.py --once         # 单次模式(处理一个任务后退出)
 
 1. 执行迁移：`pnpm db:migrate`（或手动在 Supabase SQL Editor 执行 `scripts/migrate.sql`）
 2. 通过部署平台临时注入 `BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD`、`BOOTSTRAP_ORGANIZATION_NAME`、`BOOTSTRAP_ORGANIZATION_SLUG`，运行 `pnpm admin:bootstrap`；成功后立即删除这些 Secret
-3. 运行 `pnpm seed:demo` 插入演示数据（5位候选人 + 多个职位）
+3. 运行 `pnpm seed:demo` 插入演示数据（7 位候选人 + 4 个职位，含智能制造工程师、PLC 电控工程师 2 个制造业职位）
 
 > 管理员初始化命令只允许在尚无管理员时执行。初始密码至少 12 位，且首次登录必须修改；禁止重新使用历史演示邮箱。
 
 ### 3. AI 服务依赖
 
 - LLM 经 `src/lib/ai/llm.ts` 抽象层直连 OpenAI 兼容端点（默认阿里云百炼 `qwen-plus`），无平台专属 SDK 依赖；`rules_only` 模式下完全不调用外部模型
-- 知识库检索完全本地（`assets/` 下 3 个 md 分块检索），无外部检索服务依赖
+- 知识库检索完全本地（`assets/` 下 2 个 md 分块检索：IT 技能图谱含工业制造技能组、沟通话术模板库），无外部检索服务依赖
 - 云端模型能力需部署级 + 租户级双重审批，且仅发送去标识化载荷
 
 ### 4. 构建与质量门禁

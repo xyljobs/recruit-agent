@@ -355,7 +355,7 @@ export default function ResumeBatchPage() {
       <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <Link href="/" aria-label="返回智聘 Agent">
+            <Link href="/" aria-label="返回人才决策Agent">
               <Button variant="ghost" size="icon">
                 <ArrowLeft className="h-5 w-5" />
               </Button>

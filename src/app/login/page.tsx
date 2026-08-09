@@ -125,7 +125,7 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30 mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">智聘Agent</h1>
+          <h1 className="text-2xl font-bold text-gray-900">人才决策Agent</h1>
           <p className="text-gray-500 mt-1">AI驱动的人才智能匹配系统</p>
         </div>
 
@@ -310,7 +310,7 @@ export default function LoginPage() {
 
         {/* 底部信息 */}
         <p className="text-center text-sm text-gray-400 mt-6">
-          智聘Agent · AI驱动的人才智能匹配系统
+          人才决策Agent · AI驱动的人才智能匹配系统
         </p>
       </div>
     </div>

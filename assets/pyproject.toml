@@ -1,7 +1,7 @@
 [project]
 name = "zhipin-agent-workers"
 version = "1.0.0"
-description = "智聘Agent 本地简历处理与集成 Worker"
+description = "人才决策Agent 本地简历处理与集成 Worker"
 requires-python = ">=3.11"
 dependencies = [
     "cryptography>=44.0.0",

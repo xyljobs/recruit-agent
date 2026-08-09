@@ -1,7 +1,7 @@
 # Mac mini M4 · 自托管 Supabase 数据库安装步骤
 
-> 独立执行手册。目标：在 Mac mini M4（Apple Silicon / ARM64）上用 Docker 自托管一套 Supabase，作为智聘Agent 私有部署的数据库。
-> 装完后，智聘 Agent 应用改连这台机器即可，`@supabase/supabase-js` 业务代码零改动。
+> 独立执行手册。目标：在 Mac mini M4（Apple Silicon / ARM64）上用 Docker 自托管一套 Supabase，作为人才决策Agent 私有部署的数据库。
+> 装完后，人才决策Agent 应用改连这台机器即可，`@supabase/supabase-js` 业务代码零改动。
 > 文中涉及外部招聘平台浏览器 Worker 的章节属于历史可选方案，默认 `ENABLE_BOSS_SEARCH=false`，不属于 GOAI 参赛部署；参赛环境应跳过这些章节。
 
 ---
@@ -26,7 +26,7 @@
 
 1. 打开“系统设置 → 通用 → 共享”。
 2. 打开“远程登录”，点击旁边的信息按钮。
-3. “允许访问”选择“仅这些用户”，只添加负责维护智聘 Agent 的 macOS 账号。
+3. “允许访问”选择“仅这些用户”，只添加负责维护人才决策Agent 的 macOS 账号。
 4. 本项目不需要远程读取整块磁盘，通常不要开启“允许远程用户拥有完整磁盘访问权限”。
 5. 在 Mac 终端确认用户名、内网 IP 和 SSH 主机指纹：
 
@@ -120,7 +120,7 @@ ssh -N `
   zhipin-mac
 ```
 
-随后在 Windows 浏览器访问 `http://localhost:5000` 打开智聘 Agent，访问 `http://localhost:8000` 打开 Studio；需要从 Windows 连接 PostgreSQL 时使用 `127.0.0.1:15432`。关闭该 PowerShell 窗口后隧道随即关闭，不影响 Mac mini 上的应用和数据库运行。
+随后在 Windows 浏览器访问 `http://localhost:5000` 打开人才决策Agent，访问 `http://localhost:8000` 打开 Studio；需要从 Windows 连接 PostgreSQL 时使用 `127.0.0.1:15432`。关闭该 PowerShell 窗口后隧道随即关闭，不影响 Mac mini 上的应用和数据库运行。
 
 ---
 
@@ -205,7 +205,7 @@ sh utils/add-new-auth-keys.sh --update-env
 |------|------|
 | `POSTGRES_PASSWORD` | PostgreSQL 与 Supavisor 连接密码 |
 | `JWT_SECRET` | legacy JWT 签名与兼容验证 |
-| `ANON_KEY` | 当前智聘 Agent 使用的匿名 API key |
+| `ANON_KEY` | 当前人才决策Agent 使用的匿名 API key |
 | `SERVICE_ROLE_KEY` | 当前服务端和 Worker 使用的管理 API key |
 | `SUPABASE_PUBLISHABLE_KEY` | 新版客户端 API key，保留用于后续迁移 |
 | `SUPABASE_SECRET_KEY` | 新版服务端 API key，严禁暴露到浏览器 |
@@ -225,7 +225,7 @@ POOLER_TENANT_ID=zhipin
 
 `generate-keys.sh` 不带 `--update-env` 时只会把结果打印到终端，不会更新 `.env`，因此首次安装必须保留上面的参数。`add-new-auth-keys.sh` 需要 Node.js 16 或更高版本；第 2 步已安装 Node。生成后只检查变量是否已设置，不要把密钥值复制到聊天或普通日志。
 
-> ⚠️ 本项目兼容注意：`add-new-auth-keys.sh` 会向 `.env` 写入 `JWT_JWKS`，使 PostgREST 改用非对称密钥集校验 JWT；而智聘 Agent 服务端 RLS 令牌当前仍以 legacy `JWT_SECRET` 做 HS256 签名，校验将失败，表现为登录后接口 401 / “用户不存在”。若运行了该脚本，必须从 `.env` 删除 `JWT_JWKS` 行（或把 `PGRST_JWT_SECRET` 显式设为 `${JWT_SECRET}`），再 `docker compose up -d rest` 生效。若不需要新版 publishable keys，可跳过 `add-new-auth-keys.sh`，只运行 `generate-keys.sh`。
+> ⚠️ 本项目兼容注意：`add-new-auth-keys.sh` 会向 `.env` 写入 `JWT_JWKS`，使 PostgREST 改用非对称密钥集校验 JWT；而人才决策Agent 服务端 RLS 令牌当前仍以 legacy `JWT_SECRET` 做 HS256 签名，校验将失败，表现为登录后接口 401 / “用户不存在”。若运行了该脚本，必须从 `.env` 删除 `JWT_JWKS` 行（或把 `PGRST_JWT_SECRET` 显式设为 `${JWT_SECRET}`），再 `docker compose up -d rest` 生效。若不需要新版 publishable keys，可跳过 `add-new-auth-keys.sh`，只运行 `generate-keys.sh`。
 
 可以在 Mac mini 本机用下面的命令查看应用需要的凭证，但它会同时显示 PostgreSQL、Dashboard、API 和 S3 的有效凭据。只逐项写入目标配置文件，不要整段复制、截图，或把输出粘贴到聊天、工单和日志中：
 
@@ -235,7 +235,7 @@ sh run.sh secrets
 
 如果输出曾离开受控终端，应把其中出现的所有凭据视为已暴露：API/JWT 和 S3 密钥需要重新生成，Dashboard 密码需要更换；已初始化的 PostgreSQL 不能只改 `.env`，还必须同步更新数据库内部角色密码并重建容器。
 
-> 智聘 Agent 当前仍读取 `ANON_KEY` / `SERVICE_ROLE_KEY` 对应的 legacy key。Supabase 当前版本同时兼容 legacy 和新版 API keys，因此暂不需要改业务代码。
+> 人才决策Agent 当前仍读取 `ANON_KEY` / `SERVICE_ROLE_KEY` 对应的 legacy key。Supabase 当前版本同时兼容 legacy 和新版 API keys，因此暂不需要改业务代码。
 
 ---
 
@@ -250,7 +250,7 @@ sh run.sh config remove logs
 sh run.sh recreate
 ```
 
-macOS 容器 bind mount 对扩展属性和权限的支持可能影响 Supabase Storage。智聘 Agent 当前数据库核心功能不依赖 Storage；若以后启用文件上传，应按 Supabase 官方 macOS Storage 指南改为 named volume 后再验收。
+macOS 容器 bind mount 对扩展属性和权限的支持可能影响 Supabase Storage。人才决策Agent 当前数据库核心功能不依赖 Storage；若以后启用文件上传，应按 Supabase 官方 macOS Storage 指南改为 named volume 后再验收。
 
 ---
 
@@ -338,7 +338,7 @@ sh run.sh logs kong
 
 ---
 
-## 8. 初始化智聘 Agent 的表结构与数据
+## 8. 初始化人才决策Agent 的表结构与数据
 
 项目已有迁移 SQL、一次性组织管理员初始化命令和演示数据脚本。
 
@@ -351,7 +351,7 @@ sh run.sh logs kong
 **方式二：使用项目迁移命令（推荐自动化部署使用）**
 
 ```bash
-cd <智聘Agent项目目录>
+cd <人才决策Agent项目目录>
 pnpm db:migrate
 pnpm admin:bootstrap
 pnpm seed:demo
@@ -360,7 +360,7 @@ pnpm seed:demo
 `pnpm db:migrate` 读取第 9 步 `.env.local` 中的 `PGDATABASE_URL`。如果只想手动使用 `psql`，默认应通过 Supavisor 会话模式连接：
 
 ```bash
-cd <智聘Agent项目目录>
+cd <人才决策Agent项目目录>
 psql -h localhost -p 5432 -U "postgres.<POOLER_TENANT_ID>" -d postgres -f scripts/migrate.sql
 ```
 
@@ -372,7 +372,7 @@ psql -h localhost -p 5432 -U "postgres.<POOLER_TENANT_ID>" -d postgres -f script
 
 ## 9. 应用和 Worker 连接配置
 
-在智聘 Agent 项目目录中复制模板：
+在人才决策Agent 项目目录中复制模板：
 
 ```bash
 cp .env.example .env.local
@@ -445,7 +445,7 @@ Worker 默认使用 `CANDIDATE_REPORT_MODE=local` 在 Mac mini 本地生成 `can
 ## 10. 开机自启与运维
 
 - **开机自启**：首次执行带资源参数的 `colima start` 后，先运行 `colima stop`，再运行 `brew services start colima`。这样 Homebrew 登录服务会稳定接管 Colima；不要在一个已经手工运行的实例上重复启动该服务。
-- **智聘 Agent 自启**：应用安装在 `~/servers/zhipin-agent`，launchd 标签为 `com.zhipin.agent`，仅监听 `127.0.0.1:5000`。常用检查与重启命令：
+- **人才决策Agent 自启**：应用安装在 `~/servers/zhipin-agent`，launchd 标签为 `com.zhipin.agent`，仅监听 `127.0.0.1:5000`。常用检查与重启命令：
   ```bash
   launchctl print gui/$(id -u)/com.zhipin.agent
   launchctl kickstart -k gui/$(id -u)/com.zhipin.agent

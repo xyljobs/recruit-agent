@@ -5,20 +5,20 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: '智聘Agent | 人才智能匹配系统',
-    template: '%s | 智聘Agent',
+    default: '人才决策Agent | 人才智能匹配系统',
+    template: '%s | 人才决策Agent',
   },
   description:
-    '智聘Agent是一款AI驱动的人才智能匹配系统，帮助HR高效完成JD解析、候选人匹配、智能话术生成和状态跟进管理。',
+    '人才决策Agent是一款AI驱动的人才智能匹配系统，帮助HR高效完成JD解析、候选人匹配、智能话术生成和状态跟进管理。',
   keywords: [
-    '智聘Agent',
+    '人才决策Agent',
     '人才匹配',
     'AI招聘',
     '智能招聘',
     'HR系统',
     '候选人管理',
   ],
-  authors: [{ name: '智聘Agent Team' }],
+  authors: [{ name: '人才决策Agent Team' }],
   generator: 'Next.js',
 };
 

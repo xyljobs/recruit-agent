@@ -92,7 +92,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                 <Target className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">智聘Agent</h1>
+                <h1 className="text-xl font-bold text-gray-900">人才决策Agent</h1>
                 <p className="hidden text-xs text-gray-500 sm:block">
                   企业私有部署的招聘决策副驾驶
                 </p>

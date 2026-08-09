@@ -1,4 +1,4 @@
-# 智聘Agent
+# 人才决策Agent
 
 ![CI](https://github.com/xyljobs/recruit-agent/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/github/license/xyljobs/recruit-agent)
 
@@ -87,19 +87,11 @@ cd assets && uv run --locked python -m unittest discover -s tests -v
 
 ## 产品截图
 
-截图来自 `docker compose` 从零复现环境（合成种子数据，已脱敏）。
+公开演示指南来自当前本地 `docker compose` 环境。
 
-候选人短名单：证据、缺失信息、证据完整度与人工决策留痕。
+![人才决策Agent 参赛演示指南](docs/evidence/demo-guide-2026-08-09.png)
 
-![候选人短名单](docs/images/readme-shortlists.png)
-
-数据源与 AI 执行边界：默认纯规则、租户级审批、自动降级提示。
-
-![数据源与 AI 执行边界](docs/images/readme-data-sources.png)
-
-职位与标准：纯规则模式可手工定义职位标准，AI 解析仅在批准模式可用。
-
-![职位与标准](docs/images/readme-jobs.png)
+登录后的候选人短名单、数据源和职位页面请以运行中的系统为准。原截图含旧产品名，已撤下；完成正常登录后再重新拍摄。
 
 ## 核心工作流与指标
 

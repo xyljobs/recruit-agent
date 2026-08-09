@@ -413,7 +413,7 @@ async function seedDemoData() {
           proof_type: 'other',
           proof_reference: `demo-fixture:${candData.id}`,
           proof_sha256: '',
-          controller_name: '智聘Agent演示组织',
+          controller_name: '人才决策Agent演示组织',
           controller_contact: '演示环境管理员',
           authorized_at: authorizedAt.toISOString(),
           processing_expires_at: processingExpiresAt.toISOString(),

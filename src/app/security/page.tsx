@@ -153,7 +153,7 @@ export default function SecurityPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">账号安全</h1>
-              <p className="text-sm text-gray-500">智聘Agent 双重验证</p>
+              <p className="text-sm text-gray-500">人才决策Agent 双重验证</p>
             </div>
           </div>
           <Button variant="ghost" onClick={() => router.push('/')}>

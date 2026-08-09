@@ -76,7 +76,7 @@ export function verifyTotp(
 }
 
 export function createTotpUri(secret: string, email: string): string {
-  const issuer = '智聘Agent';
+  const issuer = '人才决策Agent';
   const label = `${issuer}:${email}`;
   const params = new URLSearchParams({
     secret,

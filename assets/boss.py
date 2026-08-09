@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Boss 直聘候选人简历爬取工具 — 单文件,五个命令。
+"""历史实验性外部招聘平台浏览器自动化（默认禁用，不属于 GOAI 参赛交付）。
+
+只有在取得目标平台书面授权并完成独立法律审查后，部署方才可设置
+ENABLE_BOSS_SEARCH=true。默认配置下所有命令在启动前退出。
 
 用法:
     boss.py doctor                            检查环境
@@ -33,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import platform
 import random
 import socket
@@ -2713,6 +2717,13 @@ def main():
     if not args or args[0] in ("-h", "--help", "help"):
         print_usage()
         return 0
+
+    if os.environ.get("ENABLE_BOSS_SEARCH", "").strip().lower() != "true":
+        print(
+            "[disabled] 外部平台浏览器自动化默认关闭。"
+            "仅在取得目标平台书面授权并完成法律审查后，才可设置 ENABLE_BOSS_SEARCH=true。"
+        )
+        return 2
 
     cmd = args[0]
 

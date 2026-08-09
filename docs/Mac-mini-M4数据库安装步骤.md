@@ -2,6 +2,7 @@
 
 > 独立执行手册。目标：在 Mac mini M4（Apple Silicon / ARM64）上用 Docker 自托管一套 Supabase，作为智聘Agent 私有部署的数据库。
 > 装完后，智聘 Agent 应用改连这台机器即可，`@supabase/supabase-js` 业务代码零改动。
+> 文中涉及外部招聘平台浏览器 Worker 的章节属于历史可选方案，默认 `ENABLE_BOSS_SEARCH=false`，不属于 GOAI 参赛部署；参赛环境应跳过这些章节。
 
 ---
 

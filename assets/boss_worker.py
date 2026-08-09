@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Boss 搜索本地 Worker
-====================
+历史实验性外部招聘平台 Worker（默认禁用）
+========================================
 轮询 Supabase 中的 boss_search_tasks 表，认领 pending 任务并执行 boss.py search。
+
+该能力不属于 GOAI 参赛交付。默认配置下 Worker 在连接数据库前退出。
 
 使用方式:
   cd assets
@@ -632,6 +634,13 @@ def main():
     parser.add_argument("--report-task", help="为指定的已完成任务重新生成技能报告")
     args = parser.parse_args()
 
+    if os.environ.get("ENABLE_BOSS_SEARCH", "").strip().lower() != "true":
+        print(
+            "[disabled] 外部平台浏览器自动化默认关闭。"
+            "仅在取得目标平台书面授权并完成法律审查后，才可设置 ENABLE_BOSS_SEARCH=true。"
+        )
+        return 2
+
     print(f"🤖 Boss Worker 启动 (ID: {WORKER_ID})")
     print(f"   Supabase: {SUPABASE_URL[:30]}..." if SUPABASE_URL else "   ⚠️ 未配置 Supabase")
 
@@ -654,7 +663,7 @@ def main():
             "error_message": None if ok else error,
         })
         print("✅ 技能报告已重新生成" if ok else f"❌ {error}")
-        return
+        return 0
 
     # 启动时恢复超时任务
     recover_stuck_tasks(supabase)
@@ -701,4 +710,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

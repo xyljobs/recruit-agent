@@ -25,33 +25,6 @@ wheels = [
 ]
 
 [[package]]
-name = "boss-zhipin-scraper"
-version = "1.0.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "cloakbrowser" },
-    { name = "cryptography" },
-    { name = "pdfplumber" },
-    { name = "pymupdf" },
-    { name = "python-dotenv" },
-    { name = "pywebview" },
-    { name = "requests" },
-    { name = "supabase" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cloakbrowser", specifier = ">=0.3.31" },
-    { name = "cryptography", specifier = ">=44.0.0" },
-    { name = "pdfplumber", specifier = ">=0.11.0" },
-    { name = "pymupdf", specifier = ">=1.25.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "pywebview", specifier = ">=6.2.1" },
-    { name = "requests", specifier = ">=2.32.0" },
-    { name = "supabase", specifier = ">=2.0.0" },
-]
-
-[[package]]
 name = "bottle"
 version = "0.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1485,3 +1458,35 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bf/f4/ed5c402ac8fde4403ed3366c2716bfddc8a6677ebd59f3d62772cc7fe468/yarl-1.24.5-cp314-cp314t-win_arm64.whl", hash = "sha256:cf139c02f5f23ef6532040a30ff662c00a318c952334f211046b8e60b7f17688", size = 97222, upload-time = "2026-07-20T02:07:41.55Z" },
     { url = "https://files.pythonhosted.org/packages/61/02/962c1cbfc401a30c1d034dc67ff395f64b52302c6d62de556c1fca99acc0/yarl-1.24.5-py3-none-any.whl", hash = "sha256:a33700d13d9b7d84fd10947b09ff69fb9a792e519c8cb9764a3ca70baa6c23a7", size = 58612, upload-time = "2026-07-20T02:07:43.461Z" },
 ]
+
+[[package]]
+name = "zhipin-agent-workers"
+version = "1.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "pdfplumber" },
+    { name = "pymupdf" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "supabase" },
+]
+
+[package.optional-dependencies]
+boss-search = [
+    { name = "cloakbrowser" },
+    { name = "pywebview" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cloakbrowser", marker = "extra == 'boss-search'", specifier = ">=0.3.31" },
+    { name = "cryptography", specifier = ">=44.0.0" },
+    { name = "pdfplumber", specifier = ">=0.11.0" },
+    { name = "pymupdf", specifier = ">=1.25.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pywebview", marker = "extra == 'boss-search'", specifier = ">=6.2.1" },
+    { name = "requests", specifier = ">=2.32.0" },
+    { name = "supabase", specifier = ">=2.0.0" },
+]
+provides-extras = ["boss-search"]

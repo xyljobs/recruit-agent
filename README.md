@@ -6,6 +6,8 @@
 
 默认 `AI_EXECUTION_MODE=rules_only`，不调用模型或知识服务。部署模式只是能力上限，每个企业仍须由管理员在“数据源”页单独批准；只有逐项批准 `APPROVED_CLOUD_PROCESSORS` 且启用去标识化后，才可使用经批准的云端模型。
 
+当前实现是一条**受控招聘编排工作流**，由确定性评分、可选 LLM 能力、本地知识工具、异步 Worker 和人工决策节点共同完成任务；不把固定流程包装成“多个自主 Agent”。GOAI 参赛交付只使用企业已授权简历库、CSV/JSON 与正式 ATS 接口，外部招聘平台浏览器自动化默认关闭且不属于参赛演示范围。
+
 ## 快速开始
 
 1. 按 [Mac mini M4 数据库安装步骤](docs/Mac-mini-M4数据库安装步骤.md) 启动自托管 Supabase。
@@ -54,10 +56,9 @@ docker compose --env-file .env.local up --build
 `scripts/init-db.sh` 只执行迁移。管理员初始化和演示数据灌入必须分别显式执行，
 避免生产容器因残留环境变量自动创建管理员或写入演示数据。
 
-本地 Worker 独立运行：复制 `assets/.env.worker.example` 为 `assets/.env.worker`，然后在 `assets` 目录分别执行：
+简历批处理 Worker 独立运行：复制 `assets/.env.worker.example` 为 `assets/.env.worker`，然后在 `assets` 目录执行：
 
 ```bash
-uv run boss_worker.py
 uv run resume_batch_worker.py
 ```
 
@@ -118,13 +119,12 @@ AI 分数只参与排序。每条推荐保存版本化置信度拆解、结构�
 ```
 ├── public/                  # 静态资源（含 demo-guide.html 演示指南）
 ├── docs/                    # 部署与方案文档
-├── assets/                  # 本地知识库 md、Boss/简历批处理 Python Worker、报告模板、unittest
+├── assets/                  # 本地知识库、简历批处理 Python Worker、报告模板、unittest
 ├── scripts/                 # 迁移、种子数据、管理员初始化、Worker、启动与测试脚本
 ├── src/
 │   ├── app/                 # 页面路由与 API
 │   │   ├── (workspace)/     # analytics / candidates / data-sources / jobs / matching / outcomes / pipeline / shortlists
-│   │   ├── api/             # 后端 API（认证、匹配、短名单、集成、Boss 搜索、简历批处理等）
-│   │   ├── boss-search/     # Boss 搜索页
+│   │   ├── api/             # 后端 API（认证、匹配、短名单、集成、简历批处理等）
 │   │   └── resume-batch/    # 简历批处理页
 │   ├── features/workspace/  # 工作区特性模块（components / hooks / lib / types）
 │   ├── lib/
@@ -149,13 +149,15 @@ AI 分数只参与排序。每条推荐保存版本化置信度拆解、结构�
 
 开源依赖以 `pnpm-lock.yaml` 与 `assets/uv.lock` 为准。主要有：Next.js / React / Radix UI / Tailwind CSS（MIT）、openai SDK（Apache-2.0）、supabase-js（MIT）；Python Worker 侧 cryptography、pdfplumber（MIT）、requests（Apache-2.0）、supabase（MIT）等，其中 PyMuPDF 为 AGPL-3.0/商业双许可，仅用于扫描版 PDF 的本地渲染，运行在部署方机器、不进入 Web 端构建。
 
-外部服务仅以下三类，无其他隐蔽调用：
+参赛交付涉及的外部服务仅以下三类，无其他隐蔽调用；所有出站能力默认关闭或拒绝：
 
 | 服务 | 调用环节 | 费用假设 | 权限与边界 | 可替代性 / 锁定风险 |
 |---|---|---|---|---|
 | 阿里云百炼（OpenAI 兼容端点，默认 qwen-plus / qwen-vl-max） | JD 解析、单人深度匹配、话术生成、扫描版 PDF 视觉结构化（默认关闭） | 部署方自有 API Key、按 token 计费；系统不代收代付 | approved_cloud 下仅发送去标识化载荷，需部署级 + 租户级双重审批 | 任意 OpenAI 兼容端点经 `LLM_BASE_URL` / `LLM_MODEL` 可切换；rules_only 完全不调模型，锁定风险低 |
-| Boss 直聘 | 本地 Worker 外部寻源 | 无 API 费用，使用部署方自有平台账号 | HR 本人扫码登录、本地执行，系统不存平台凭证；不调用非官方 API，预留官方 API 接入位 | 搜索 Agent 可整体移除，回退内部简历库 |
+| 企业 ATS / CSV / JSON | 授权候选人导入与结果写回 | 由部署方现有系统决定 | 导入须携带授权记录；写回仅允许精确 HTTPS 主机白名单 | CSV/JSON 可作为无外部依赖基线 |
 | 钉钉 MCP（可选） | 简历批处理写回 | 依赖部署方自有钉钉应用 | 默认关闭，需管理员显式配置 | 可选通道，不影响主流程 |
+
+仓库保留的实验性浏览器自动化代码不属于参赛交付，`ENABLE_BOSS_SEARCH=false` 时页面、API 与命令行入口均拒绝运行。任何启用都以目标平台书面授权、账号授权和独立法律审查为前提。完整依赖与发布边界见 [第三方依赖与发布边界](docs/第三方依赖与发布边界.md)。
 
 ## 质量门禁
 
@@ -174,7 +176,7 @@ GitHub Actions 对每次推送运行 `validate` + 单元测试 + Python Worker �
 - **UI**: shadcn/ui (Radix UI) + Tailwind CSS 4
 - **数据库**: Supabase (PostgreSQL，可 Docker 自托管)
 - **AI**: OpenAI 兼容抽象层（默认阿里云百炼 `qwen-plus`），本地 Markdown 知识库
-- **Worker**: Python（uv 管理）——Boss 直聘搜索与简历批处理
+- **Worker**: TypeScript / Python（pnpm + uv 管理）——批量匹配、ATS 写回与简历批处理
 - **包管理器**: pnpm 9+（`preinstall` 拦截 npm/yarn）
 
 ## 项目文档
@@ -183,12 +185,15 @@ GitHub Actions 对每次推送运行 `validate` + 单元测试 + Python Worker �
 - [DESIGN.md](DESIGN.md) — 设计规范
 - [docs/Mac-mini-M4数据库安装步骤.md](docs/Mac-mini-M4数据库安装步骤.md) — 自托管 Supabase 安装
 - [docs/简历批处理与钉钉写回部署说明.md](docs/简历批处理与钉钉写回部署说明.md)
-- [docs/Boss结构化简历与candidate-analysis报告方案.md](docs/Boss结构化简历与candidate-analysis报告方案.md)
-- [docs/GOAI参赛说明_无界应用.md](docs/GOAI参赛说明_无界应用.md) — GOAI 无界应用赛道参赛说明（目标用户/闭环/架构/合规/Agent 自证）
+- [docs/GOAI参赛说明_无界应用.md](docs/GOAI参赛说明_无界应用.md) — GOAI 无界应用赛道参赛说明（目标用户/闭环/架构/合规/实现边界）
 - [docs/GOAI作品简介_500字.md](docs/GOAI作品简介_500字.md) — 初赛提交用作品简介（≤500 字）
 - [docs/GOAI无界应用_方案PPT.pptx](docs/GOAI无界应用_方案PPT.pptx) — 初赛方案 PPT
+- [docs/GOAI无界应用_方案PPT.pdf](docs/GOAI无界应用_方案PPT.pdf) — 与 PPT 同版的 12 页评审 PDF
 - [docs/数据合规与隐私白皮书.md](docs/数据合规与隐私白皮书.md) — 数据合规与隐私保护全文
-- [docs/评测报告_2026-08.md](docs/评测报告_2026-08.md) — 真实数据评测：Spearman 0.706、强推召回率@10 4/4（可复现）
+- [docs/评测报告_2026-08.md](docs/评测报告_2026-08.md) — IT 单岗位真实数据基线：Spearman 0.706、NDCG@10 0.844、Precision@5 0.400、强推召回率@10 4/4（可复现，不外推为制造业结论）
+- [docs/evidence/java-resume-source-audit-2026-08-09.md](docs/evidence/java-resume-source-audit-2026-08-09.md) — 20 份授权 Java PDF 的本地完整性、匿名映射与结构化差异核对
+- [docs/制造业评测方案.md](docs/制造业评测方案.md) — PLC / 工业机器人 / 设备维护三岗位正式评测协议与验收门槛
+- [docs/第三方依赖与发布边界.md](docs/第三方依赖与发布边界.md) — 直接依赖、外部服务与参赛发布边界
 - [docs/evidence/README.md](docs/evidence/README.md) — 运行证据与质量门禁证据包
 - [docs/evidence/从零复现演练_2026-08-05.md](docs/evidence/从零复现演练_2026-08-05.md) — Docker 全链路从零复现演练与回归修复记录
 

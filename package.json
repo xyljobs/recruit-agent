@@ -15,6 +15,7 @@
     "ts-check": "tsc -p tsconfig.json --incremental false",
     "validate": "tsc -p tsconfig.json --incremental false && eslint . --quiet",
     "seed:demo": "pnpm exec tsx scripts/seed-demo.ts",
+    "eval:import-annotations": "tsx scripts/import-match-annotations.ts",
     "eval:match": "tsx scripts/eval-match-benchmark.ts",
     "admin:bootstrap": "pnpm exec tsx scripts/bootstrap-admin.ts",
     "db:migrate": "tsx scripts/migrate.ts",

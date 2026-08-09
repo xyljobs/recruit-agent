@@ -13,7 +13,7 @@
  *   ]
  * }
  *
- * 输出：逐候选人得分表 + Spearman 秩相关 + Top-K 命中率。
+ * 输出：逐候选人得分表、排序指标、强推召回、硬性条件误放和双标注一致性。
  * 该脚本只读本地 JSON，不访问数据库与模型，可在 CI 与离线环境运行。
  */
 import { readFileSync } from 'fs';
@@ -24,10 +24,22 @@ import {
   type MatchCandidateInput,
   type MatchJobInput,
 } from '@/lib/matching/scorer';
+import {
+  calculateQuadraticWeightedKappa,
+  calculateRankingMetrics,
+  calculateSpearman,
+} from '@/lib/matching/evaluation';
+
+interface BenchmarkAnnotation {
+  annotator_id: string;
+  human_rank: number;
+}
 
 interface BenchmarkCandidate {
   id: string;
   human_rank: number;
+  hard_fail?: boolean;
+  annotations?: BenchmarkAnnotation[];
   profile: MatchCandidateInput;
 }
 
@@ -36,41 +48,28 @@ interface Benchmark {
   candidates: BenchmarkCandidate[];
 }
 
-function averageRanks(values: number[]): number[] {
-  const sorted = values
-    .map((value, index) => ({ value, index }))
-    .sort((a, b) => a.value - b.value);
-  const ranks = new Array<number>(values.length);
-  let i = 0;
-  while (i < sorted.length) {
-    let j = i;
-    while (j + 1 < sorted.length && sorted[j + 1].value === sorted[i].value) j += 1;
-    const averageRank = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k += 1) ranks[sorted[k].index] = averageRank;
-    i = j + 1;
+function getCompleteAnnotationPair(
+  candidates: readonly BenchmarkCandidate[],
+): { first: number[]; second: number[]; annotators: [string, string] } | null {
+  const annotatorIds = [...new Set(
+    candidates.flatMap(candidate => candidate.annotations?.map(annotation => annotation.annotator_id) ?? []),
+  )].sort();
+  if (annotatorIds.length !== 2) return null;
+  const [firstAnnotator, secondAnnotator] = annotatorIds;
+  const first: number[] = [];
+  const second: number[] = [];
+  for (const candidate of candidates) {
+    const firstRank = candidate.annotations?.find(
+      annotation => annotation.annotator_id === firstAnnotator,
+    )?.human_rank;
+    const secondRank = candidate.annotations?.find(
+      annotation => annotation.annotator_id === secondAnnotator,
+    )?.human_rank;
+    if (firstRank === undefined || secondRank === undefined) return null;
+    first.push(firstRank);
+    second.push(secondRank);
   }
-  return ranks;
-}
-
-function spearman(a: number[], b: number[]): number {
-  if (a.length !== b.length || a.length < 2) return 0;
-  const rankA = averageRanks(a);
-  const rankB = averageRanks(b);
-  const n = rankA.length;
-  const meanA = rankA.reduce((s, v) => s + v, 0) / n;
-  const meanB = rankB.reduce((s, v) => s + v, 0) / n;
-  let cov = 0;
-  let varA = 0;
-  let varB = 0;
-  for (let i = 0; i < n; i += 1) {
-    const da = rankA[i] - meanA;
-    const db = rankB[i] - meanB;
-    cov += da * db;
-    varA += da * da;
-    varB += db * db;
-  }
-  if (varA === 0 || varB === 0) return 0;
-  return cov / Math.sqrt(varA * varB);
+  return { first, second, annotators: [firstAnnotator, secondAnnotator] };
 }
 
 function main(): void {
@@ -94,6 +93,7 @@ function main(): void {
     return {
       id: candidate.id,
       humanRank: candidate.human_rank,
+      hardFail: candidate.hard_fail,
       overall: score.overall_score,
       skill: score.skill_score,
       experience: score.experience_score,
@@ -106,7 +106,7 @@ function main(): void {
 
   const humanRanks = rows.map(row => row.humanRank);
   const systemRanks = rows.map(row => systemRankById.get(row.id) ?? 0);
-  const rho = spearman(humanRanks, systemRanks);
+  const rho = calculateSpearman(humanRanks, systemRanks);
 
   const k = Math.min(3, rows.length);
   const humanTopK = new Set(
@@ -126,7 +126,11 @@ function main(): void {
   }
   console.log('');
   console.log(`Spearman 秩相关: ${rho.toFixed(3)}`);
-  console.log(`Top-${k} 命中率: ${hits}/${k}`);
+  console.log(`Top-${k} 命中（并列截断，仅兼容）: ${hits}/${k}`);
+
+  const rankingMetrics = calculateRankingMetrics(systemOrder);
+  console.log(`NDCG@10: ${rankingMetrics.ndcgAt10.toFixed(3)}`);
+  console.log(`Precision@5: ${rankingMetrics.precisionAt5.toFixed(3)}`);
 
   // 强推召回率：人工最高档（human_rank=1）在系统前 K 名中的覆盖比例，
   // 避免并列档位下 Top-K 截断造成的误导
@@ -139,6 +143,24 @@ function main(): void {
         .filter(row => topTierSet.has(row.id)).length;
       console.log(`强推召回率@${recallK}: ${recallHits}/${topTier.length}`);
     }
+  }
+
+  console.log(`强推漏出数@10: ${rankingMetrics.strongMissIdsAt10.length}`);
+  if (benchmark.candidates.some(candidate => candidate.hard_fail !== undefined)) {
+    console.log(`硬性条件误放数@10: ${rankingMetrics.hardFailTop10Ids.length}`);
+  } else {
+    console.log('硬性条件误放数@10: 未评估（基准文件缺少 hard_fail）');
+  }
+
+  const annotationPair = getCompleteAnnotationPair(benchmark.candidates);
+  if (annotationPair) {
+    const kappa = calculateQuadraticWeightedKappa(annotationPair.first, annotationPair.second);
+    console.log(
+      `双标注加权 Cohen's kappa (${annotationPair.annotators.join(' / ')}): `
+      + (kappa === null ? '无法计算' : kappa.toFixed(3)),
+    );
+  } else {
+    console.log("双标注加权 Cohen's kappa: 未评估（需要两位标注者覆盖全部候选人）");
   }
 
   if (rho < 0.5) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCurrentAuthSession } from '@/lib/auth-session';
+import { isBossSearchEnabled } from '@/lib/feature-flags';
 import { getRequestSecurityError } from '@/lib/request-security';
 
 // 公开路径（无需登录）
@@ -55,6 +56,20 @@ function getRequiredRoles(pathname: string): string[] | null {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (
+    !isBossSearchEnabled()
+    && (pathname === '/boss-search' || pathname.startsWith('/api/boss-search'))
+  ) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { success: false, error: '此部署未启用外部平台浏览器自动化' },
+        { status: 404 },
+      );
+    }
+    return new NextResponse('Not Found', { status: 404 });
+  }
+
   const isPublicMutation = pathname === '/api/auth/login' || pathname === '/api/auth/register';
   if (pathname.startsWith('/api/')) {
     const securityError = getRequestSecurityError(request, isPublicMutation);

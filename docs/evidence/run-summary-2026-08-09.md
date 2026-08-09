@@ -1,0 +1,29 @@
+# 提交修复后质量门禁（2026-08-09）
+
+> 本记录汇总本轮修改后的 fresh verification。命令在同一工作区执行，未使用生产数据或真实候选人凭证。
+
+| 门禁 | 结果 |
+|---|---|
+| TypeScript `tsc -p tsconfig.json --incremental false` | 通过，退出码 0 |
+| ESLint `eslint . --quiet` | 通过，退出码 0 |
+| TypeScript 单元测试 `tsx --test "src/**/*.test.ts"` | **79/79 通过** |
+| Python Worker unittest | **25/25 通过** |
+| 数据库集成测试 | 通过：迁移、RLS、状态、幂等、导入、Worker RPC、清理与性能包络 |
+| 数据库性能包络 | shortlist p95 3.3502 ms；outcome write p95 3.2725 ms；metric read p95 7.3798 ms |
+| Next.js 生产构建 | 通过，49 个静态页面生成完成 |
+| TypeScript Worker 构建 | 通过，match / integration 两个 CJS 产物生成 |
+| Java 单岗位基线 | Spearman 0.706；NDCG@10 0.844；Precision@5 0.400；强推召回@5 2/4；@10 4/4；强推漏出数@10 为 0 |
+| PPTX 版式溢出检测 | 12 页通过，无 overflow |
+| PDF 检查 | PowerPoint 成功打开最终 PPTX 并导出；PDF 12 页、未加密、逐页渲染检查通过 |
+| 本地 Docker 冒烟 | `/demo-guide.html` 200、`/login` 200、未登录业务 API 401、外部平台页面与 API 404；app / match-worker / integration-worker 均 running，重启计数 0 |
+| 演示数据完整性 | 4 个职位、7 位虚构候选人、3 个短名单批次、21 条短名单记录；2 个制造业职位 |
+
+## 环境说明
+
+当前托管环境中的 `pnpm` 包装器会尝试将现有 `node_modules` 迁移到不可写的项目内 store，随后在无 TTY 环境要求确认清空依赖目录。为避免无提示删除现有依赖，本轮使用仓库已安装的同版本 `tsc`、`eslint`、`tsx`、`next` 与 `tsup` 可执行文件逐项运行等价脚本；代码、测试参数与 `package.json` 门禁保持一致。
+
+数据库测试在隔离的 Docker PostgreSQL 中运行，结束后由测试脚本自行清理。浏览器自动化脚本在未设置 `ENABLE_BOSS_SEARCH=true` 时于连接数据库或启动浏览器前拒绝运行。
+
+本地 Docker 冒烟时发现应用的 `secrets/` 仍保留旧 Supabase 密钥，而 `.env.local` 已与当前本机 Supabase 对齐。旧文件先备份到 Git 忽略的私有目录，再只同步 anon / service-role 两项并重启三个应用容器；复测页面与权限状态正常。密钥值和备份均未进入仓库。
+
+本次只读数据核对显示人工短名单决策、沟通 brief 和结果事件均为 0，因此该环境当前只能证明“职位 → 规则匹配 → 短名单”已落库，不能把“人工决策 → 沟通 → 结果复盘”写成 2026-08-09 的新现场闭环证据。完整闭环的历史复现记录与合成截图见本目录索引；正式视频仍须使用有效登录凭证现场操作并录制。

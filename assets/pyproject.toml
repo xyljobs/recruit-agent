@@ -1,15 +1,20 @@
 [project]
-name = "boss-zhipin-scraper"
+name = "zhipin-agent-workers"
 version = "1.0.0"
-description = "Boss 直聘候选人简历爬取工具"
+description = "智聘Agent 本地简历处理与集成 Worker"
 requires-python = ">=3.11"
 dependencies = [
-    "cloakbrowser>=0.3.31",
     "cryptography>=44.0.0",
     "pdfplumber>=0.11.0",
     "pymupdf>=1.25.0",
-    "pywebview>=6.2.1",
     "requests>=2.32.0",
     "supabase>=2.0.0",
     "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# 历史实验性浏览器自动化依赖；默认安装与 GOAI 参赛运行均不包含。
+boss-search = [
+    "cloakbrowser>=0.3.31",
+    "pywebview>=6.2.1",
 ]

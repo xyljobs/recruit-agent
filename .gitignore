@@ -96,6 +96,8 @@ assets/boss_search_tasks.json
 
 # Local resumes and generated reports
 /简历/
+/private-evaluation/
+/tmp/pdfs/
 /resume-*/
 /reports/
 /assets/reports/

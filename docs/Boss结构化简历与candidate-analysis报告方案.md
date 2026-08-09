@@ -1,5 +1,7 @@
 # Boss 结构化简历与 candidate-analysis 报告方案
 
+> **历史实验文档 / GOAI 参赛排除项。** 浏览器自动化默认关闭，不属于参赛交付或演示。本文保留用于工程追溯，不构成启用建议；任何启用必须先取得目标平台书面授权并完成独立法律审查。
+
 ## 1. 目标与结论
 
 本项目采用以下默认方案：
@@ -121,4 +123,3 @@ CANDIDATE_REPORT_MODE=local uv run --frozen boss_worker.py --report-task <任务
 - 下载的 HTML 只包含转义后的文本，不嵌入 Boss Cookie、接口 URL、API Key 或原始响应 JSON。
 - 设置明确的数据保留期限，到期按任务目录精确清理；删除前确认不再用于招聘审计。
 - 搜索、补采和登录只使用 `assets/boss.py`，不得用普通浏览器自动化替代。
-

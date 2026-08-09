@@ -82,18 +82,35 @@ const REQUIRED_PRODUCTION_TABLES: RequiredTable[] = [
   { name: 'resume_batch_tasks', columns: 'id, organization_id, user_id' },
 ];
 
-export async function assertProductionSchema(): Promise<void> {
-  const supabase = getSupabaseServiceClient();
+const SCHEMA_CHECK_MAX_ATTEMPTS = 3;
 
-  for (const table of REQUIRED_PRODUCTION_TABLES) {
+async function checkTableWithRetry(
+  supabase: ReturnType<typeof getSupabaseServiceClient>,
+  table: RequiredTable,
+): Promise<void> {
+  let lastError: { message?: string; code?: string } | null = null;
+  for (let attempt = 1; attempt <= SCHEMA_CHECK_MAX_ATTEMPTS; attempt++) {
     const { error } = await supabase
       .from(table.name)
       .select(table.columns)
       .limit(1);
-    if (error) {
-      throw new Error(
-        `数据库安全架构未就绪（${table.name}）：请先完整执行 scripts/migrate.sql`,
-      );
+    if (!error) {
+      return;
     }
+    lastError = error;
+    if (attempt < SCHEMA_CHECK_MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+    }
+  }
+  throw new Error(
+    `数据库安全架构未就绪（${table.name}）：请先完整执行 scripts/migrate.sql（底层错误：${lastError?.code ?? ''} ${lastError?.message ?? 'unknown'}）`,
+  );
+}
+
+export async function assertProductionSchema(): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+
+  for (const table of REQUIRED_PRODUCTION_TABLES) {
+    await checkTableWithRetry(supabase, table);
   }
 }

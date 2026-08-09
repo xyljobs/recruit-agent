@@ -1,620 +1,161 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>智聘Agent 演示指南</title>
-<style>
-  @import url('https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
-
-  :root {
-    --blue-500: #3B82F6;
-    --blue-600: #2563EB;
-    --blue-50: #EFF6FF;
-    --emerald-500: #10B981;
-    --amber-500: #F59E0B;
-    --red-500: #EF4444;
-    --gray-500: #6B7280;
-    --gray-700: #374151;
-    --gray-900: #111827;
-    --slate-50: #F8FAFC;
-    --slate-100: #F1F5F9;
-  }
-
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  body {
-    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-    color: var(--gray-700);
-    background: var(--slate-50);
-    line-height: 1.7;
-    font-size: 15px;
-  }
-
-  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
-
-  /* Header */
-  .header {
-    text-align: center;
-    padding: 48px 24px;
-    background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 50%, #60A5FA 100%);
-    color: white;
-    margin: -40px -24px 40px;
-    padding-left: 48px;
-    padding-right: 48px;
-  }
-  .header h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
-  .header .subtitle { font-size: 16px; opacity: 0.9; font-weight: 300; }
-  .header .url-box {
-    display: inline-block;
-    margin-top: 16px;
-    background: rgba(255,255,255,0.15);
-    backdrop-filter: blur(8px);
-    padding: 8px 20px;
-    border-radius: 8px;
-    font-family: monospace;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .header .url-box:hover { background: rgba(255,255,255,0.25); }
-  .header .credentials {
-    margin-top: 12px;
-    font-size: 13px;
-    opacity: 0.85;
-  }
-
-  /* Section */
-  .section {
-    background: white;
-    border-radius: 12px;
-    padding: 32px;
-    margin-bottom: 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    border: 1px solid #E5E7EB;
-  }
-  .section h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--gray-900);
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .section h2 .step-num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--blue-500);
-    color: white;
-    font-size: 15px;
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-  .section h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--gray-900);
-    margin: 20px 0 8px;
-  }
-
-  /* Scenario box */
-  .scenario {
-    background: var(--blue-50);
-    border-left: 4px solid var(--blue-500);
-    padding: 16px 20px;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 20px;
-  }
-  .scenario .label {
-    font-weight: 600;
-    color: var(--blue-600);
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-  }
-  .scenario p { font-size: 14px; color: var(--gray-700); }
-
-  /* Steps */
-  .steps { list-style: none; padding: 0; }
-  .steps li {
-    padding: 12px 16px;
-    border-left: 3px solid #D1D5DB;
-    margin-left: 8px;
-    margin-bottom: 8px;
-    position: relative;
-    transition: border-color 0.2s;
-  }
-  .steps li:hover { border-left-color: var(--blue-500); }
-  .steps li strong { color: var(--gray-900); }
-  .steps li .hint {
-    display: inline-block;
-    background: #FEF3C7;
-    color: #92400E;
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    margin-left: 6px;
-    font-weight: 500;
-  }
-  .steps li .key {
-    display: inline-block;
-    background: var(--slate-100);
-    border: 1px solid #D1D5DB;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 13px;
-    color: var(--gray-900);
-  }
-
-  /* Talk script */
-  .talk-script {
-    background: var(--slate-100);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin: 12px 0;
-    font-size: 14px;
-    line-height: 1.8;
-  }
-  .talk-script .speaker {
-    font-weight: 600;
-    color: var(--blue-600);
-  }
-
-  /* Feature grid */
-  .feature-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin: 16px 0;
-  }
-  .feature-card {
-    background: var(--slate-50);
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    padding: 16px;
-    text-align: center;
-  }
-  .feature-card .icon { font-size: 28px; margin-bottom: 8px; }
-  .feature-card .title { font-weight: 600; font-size: 14px; color: var(--gray-900); }
-  .feature-card .desc { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
-
-  /* Tech badge */
-  .tech-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-  .tech-badge {
-    display: inline-block;
-    background: white;
-    border: 1px solid #D1D5DB;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 13px;
-    color: var(--gray-700);
-  }
-  .tech-badge.highlight { background: var(--blue-50); border-color: var(--blue-500); color: var(--blue-600); font-weight: 500; }
-
-  /* Security section */
-  .security-flow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin: 12px 0;
-    font-size: 14px;
-  }
-  .security-flow .node {
-    background: white;
-    border: 2px solid var(--blue-500);
-    padding: 6px 14px;
-    border-radius: 6px;
-    font-weight: 500;
-    color: var(--gray-900);
-  }
-  .security-flow .arrow { color: var(--gray-500); font-size: 18px; }
-
-  /* Data table */
-  .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 12px 0;
-    font-size: 14px;
-  }
-  .data-table th {
-    background: var(--slate-100);
-    padding: 8px 12px;
-    text-align: left;
-    font-weight: 600;
-    color: var(--gray-900);
-    border-bottom: 2px solid #D1D5DB;
-  }
-  .data-table td {
-    padding: 8px 12px;
-    border-bottom: 1px solid #E5E7EB;
-  }
-  .data-table tr:hover td { background: var(--blue-50); }
-
-  /* Score bar */
-  .score-bar {
-    display: inline-block;
-    height: 8px;
-    border-radius: 4px;
-    min-width: 40px;
-  }
-  .score-emerald { background: var(--emerald-500); }
-  .score-blue { background: var(--blue-500); }
-  .score-amber { background: var(--amber-500); }
-  .score-red { background: var(--red-500); }
-
-  /* Print styles */
-  @media print {
-    body { background: white; }
-    .header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .section { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智聘Agent｜参赛演示指南</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #122033;
+      --muted: #5d6b7e;
+      --line: #dbe4ef;
+      --paper: #ffffff;
+      --wash: #f4f7fb;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --green: #087a55;
+      --amber: #9a5b00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--wash);
+      color: var(--ink);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.7;
+    }
+    header {
+      background: linear-gradient(125deg, #0d1b33 0%, #183b76 72%, #2563eb 100%);
+      color: white;
+      padding: 64px 24px 52px;
+    }
+    header .inner, main { max-width: 1080px; margin: 0 auto; }
+    .eyebrow { letter-spacing: .14em; font-size: 13px; font-weight: 700; opacity: .78; }
+    h1 { margin: 10px 0 12px; font-size: clamp(34px, 6vw, 60px); line-height: 1.08; }
+    header p { max-width: 760px; margin: 0; font-size: 18px; opacity: .9; }
+    main { padding: 34px 20px 72px; }
+    section {
+      margin: 20px 0;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: 0 10px 30px rgba(31, 52, 82, .06);
+    }
+    h2 { margin: 0 0 14px; font-size: 25px; }
+    h3 { margin: 22px 0 8px; font-size: 17px; }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0; padding-left: 24px; }
+    .notice {
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+      padding: 14px 16px;
+      border-radius: 10px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 13px; }
+    .card strong { display: block; margin-bottom: 4px; }
+    .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .node { padding: 8px 11px; border-radius: 999px; background: #eef3f9; font-weight: 650; }
+    .arrow { color: var(--blue); font-weight: 800; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 13px; }
+    code { background: #edf2f7; border-radius: 5px; padding: 2px 5px; }
+    .ok { color: var(--green); font-weight: 700; }
+    .pending { color: var(--amber); font-weight: 700; }
+    .muted { color: var(--muted); }
+    footer { padding: 26px 20px 48px; color: var(--muted); text-align: center; }
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      section { padding: 21px; }
+      th, td { padding: 9px 7px; }
+    }
+  </style>
 </head>
 <body>
-<div class="container">
+  <header>
+    <div class="inner">
+      <div class="eyebrow">GOAI · BOUNDLESS AGENTS · DEMO GUIDE</div>
+      <h1>智聘Agent</h1>
+      <p>面向工业制造招聘的私有部署决策副驾驶。系统整理证据与缺失项，HR 保留每一次接受、覆盖、触达和录用决定。</p>
+    </div>
+  </header>
 
-<!-- Header -->
-<div class="header">
-  <h1>智聘Agent 人才智能匹配系统</h1>
-  <div class="subtitle">客户演示指南 &mdash; 从JD到录用的全流程AI驱动</div>
-  <div class="url-box" onclick="window.open('/','_blank')">
-    打开当前部署首页
-  </div>
-  <div class="credentials">
-    登录账号: <em>由演示人员提供</em> &nbsp;<span style="font-size:12px;color:var(--gray-400)">（演示环境临时账号，请勿用于生产）</span>
-  </div>
-</div>
+  <main>
+    <section>
+      <h2>先说清楚：它是什么</h2>
+      <div class="notice">
+        当前产品是一条<strong>单一受控编排工作流</strong>，不是四个自主 Agent，也不是全自动招聘。业务状态机规定步骤，模型只能通过审批网关工作，AI 分数只用于排序。
+      </div>
+      <div class="flow" style="margin-top:18px">
+        <span class="node">职位标准</span><span class="arrow">→</span>
+        <span class="node">授权简历</span><span class="arrow">→</span>
+        <span class="node">证据排序</span><span class="arrow">→</span>
+        <span class="node">人工短名单</span><span class="arrow">→</span>
+        <span class="node">沟通准备</span><span class="arrow">→</span>
+        <span class="node">结果复盘</span>
+      </div>
+    </section>
 
-<!-- Overview -->
-<div class="section">
-  <h2>系统全景</h2>
-  <div class="feature-grid">
-    <div class="feature-card"><div class="icon">📋</div><div class="title">JD智能解析</div><div class="desc">AI提取结构化需求卡片</div></div>
-    <div class="feature-card"><div class="icon">🔍</div><div class="title">候选人搜索</div><div class="desc">多条件智能检索授权候选人</div></div>
-    <div class="feature-card"><div class="icon">📊</div><div class="title">六维匹配评分</div><div class="desc">技能35% / 经验25% / 薪资15% / 地域10% / 到岗10% / 稳定性5%</div></div>
-    <div class="feature-card"><div class="icon">💬</div><div class="title">个性化话术</div><div class="desc">LLM生成千人千面沟通内容</div></div>
-    <div class="feature-card"><div class="icon">📋</div><div class="title">看板跟进</div><div class="desc">待接触→已联系→面试→录用</div></div>
-    <div class="feature-card"><div class="icon">🔒</div><div class="title">合规与安全</div><div class="desc">AES-256加密 / 授权撤回 / 审计日志</div></div>
-  </div>
+    <section>
+      <h2>4 分钟演示路线</h2>
+      <ol>
+        <li><strong>数据源：</strong>展示 <code>rules_only</code> 默认不调用模型，以及租户管理员逐项审批。</li>
+        <li><strong>职位与标准：</strong>选择 PLC / 电控演示职位，核对技能、经验和硬性条件。</li>
+        <li><strong>候选人短名单：</strong>发起确定性预筛，展开证据、缺失信息和置信度拆解。</li>
+        <li><strong>人工决策：</strong>分别演示“接受、要求补充、覆盖”，覆盖时填写理由。</li>
+        <li><strong>沟通与结果：</strong>只为人工已接受候选人准备 brief，并记录联系 / 面试结果。</li>
+        <li><strong>看板与降级：</strong>查看真实结果指标；关闭云端处理器，确认流程回到纯规则。</li>
+      </ol>
+    </section>
 
-  <h3>核心叙事线</h3>
-  <div class="security-flow">
-    <span class="node">输入JD</span><span class="arrow">→</span>
-    <span class="node">AI解析</span><span class="arrow">→</span>
-    <span class="node">搜索候选人</span><span class="arrow">→</span>
-    <span class="node">多维评分</span><span class="arrow">→</span>
-    <span class="node">生成话术</span><span class="arrow">→</span>
-    <span class="node">看板跟进</span><span class="arrow">→</span>
-    <span class="node">授权撤回</span>
-  </div>
+    <section>
+      <h2>评委应看到的三件事</h2>
+      <div class="grid">
+        <div class="card"><strong>人工责任</strong><span class="muted">AI 不能自动拒绝、发 Offer 或录用；覆盖理由可追溯。</span></div>
+        <div class="card"><strong>执行边界</strong><span class="muted">模型未经部署级与租户级批准就无法工作；外发失败会降级。</span></div>
+        <div class="card"><strong>真实结果</strong><span class="muted">看板基于联系、面试和录用事件；零样本显示“待积累”。</span></div>
+      </div>
+    </section>
 
-  <h3>技术亮点</h3>
-  <div class="tech-badges">
-    <span class="tech-badge highlight">Next.js 16</span>
-    <span class="tech-badge highlight">AES-256-GCM 加密</span>
-    <span class="tech-badge highlight">HMAC-SHA256 签名</span>
-    <span class="tech-badge highlight">OpenAI 兼容 LLM + 本地知识库</span>
-    <span class="tech-badge">React 19</span>
-    <span class="tech-badge">TypeScript 5</span>
-    <span class="tech-badge">Supabase</span>
-    <span class="tech-badge">shadcn/ui</span>
-    <span class="tech-badge">RBAC 权限控制</span>
-    <span class="tech-badge">JWT 认证</span>
-  </div>
-</div>
+    <section>
+      <h2>当前可引用的量化证据</h2>
+      <table>
+        <thead><tr><th>证据</th><th>结果</th><th>边界</th></tr></thead>
+        <tbody>
+          <tr><td>Java 单岗位离线基线</td><td>Spearman <strong>0.706</strong></td><td>20 份真实授权去标识简历，1 位 IT 招聘方</td></tr>
+          <tr><td>人工强推召回</td><td>@5 <strong>2/4</strong>；@10 <strong>4/4</strong></td><td>只证明该样本的证据排序，不是准确率</td></tr>
+          <tr><td>制造业正式评测</td><td class="pending">尚未完成</td><td>计划 3 岗位、至少 60 份授权简历、HR + 业务专家双标注</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">复现：<code>pnpm eval:match scripts/match-benchmark.java-real.json</code>。以上数据不能外推为制造业准确率、招聘周期、成本或回复率改善。</p>
+    </section>
 
-<!-- Step 1 -->
-<div class="section">
-  <h2><span class="step-num">1</span>登录系统</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>HR小王早上到工位，打开智聘Agent系统开始一天的招聘工作。</p>
-  </div>
-  <ol class="steps">
-    <li>打开浏览器，访问系统地址</li>
-    <li>输入演示账号和密码 <span class="hint">由演示人员提供</span></li>
-    <li>点击「登录」，进入系统首页 <span class="hint">首页即看板总览</span></li>
-  </ol>
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"首先，HR小王登录系统。可以看到首页是一个招聘看板，总览了所有在招职位、候选人数量和匹配情况。这里我们可以看到当前在招职位、候选人数量和匹配记录，招聘全景一目了然。"
-  </div>
-</div>
+    <section>
+      <h2>数据与参赛边界</h2>
+      <ul>
+        <li>演示使用虚构 seed 数据；真实数据必须来自企业自有授权简历库或正式 ATS / CSV 接口。</li>
+        <li>姓名、联系方式、当前公司和职位加密存储；候选人授权可撤回。</li>
+        <li>云端模型只接收去标识化能力画像；扫描件外部视觉分析默认关闭。</li>
+        <li><strong>外部招聘平台浏览器自动化默认关闭，不属于参赛交付或演示。</strong></li>
+      </ul>
+    </section>
 
-<!-- Step 2 -->
-<div class="section">
-  <h2><span class="step-num">2</span>JD智能解析</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>业务部门发来一段JD文本，HR小王需要快速理解岗位需求并录入系统。传统方式需要手动拆解，现在AI一键完成。</p>
-  </div>
-  <ol class="steps">
-    <li>点击顶部 <strong>「JD解析」</strong> 标签页</li>
-    <li>在文本框中粘贴以下JD内容 <span class="hint">可直接复制</span></li>
-    <li>点击 <strong>「AI智能解析」</strong> 按钮</li>
-    <li>等待3-5秒，观察右侧结构化需求卡片自动生成</li>
-    <li>重点展示：<strong>隐含需求</strong>和<strong>完整度评估</strong> <span class="hint">这是AI的价值点</span></li>
-  </ol>
+    <section>
+      <h2>演示前自检</h2>
+      <table>
+        <tbody>
+          <tr><td class="ok">必须</td><td>数据库迁移、管理员首登改密、seed 数据、5000 端口与完整闭环可用</td></tr>
+          <tr><td class="ok">必须</td><td><code>ENABLE_BOSS_SEARCH=false</code>，页面、API 和本地脚本均不可运行</td></tr>
+          <tr><td class="ok">必须</td><td>不展示真实姓名、联系方式、Cookie、API Key 或管理员 Secret</td></tr>
+          <tr><td class="pending">待提交</td><td>按《Demo视频拍摄脚本》录制、匿名访问复核，并在报名页填写实际链接</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
 
-  <h3>演示用JD（可直接复制）</h3>
-  <div class="talk-script" style="white-space: pre-wrap; font-size: 13px;">
-【招聘岗位】
-职位名称：前端架构师
-部门：技术中心
-工作地点：杭州
-薪资范围：40-60K
-
-【岗位要求】
-1. 本科及以上学历，计算机相关专业
-2. 5年以上前端开发经验
-3. 精通React、TypeScript，有架构设计经验
-4. 良好的沟通能力和团队协作精神
-
-【岗位职责】
-1. 负责公司前端架构设计和优化
-2. 制定前端技术规范和最佳实践
-3. 带领团队攻克技术难题
-4. 参与产品技术方案评审
-
-【福利待遇】
-- 六险一金
-- 年终奖
-- 股票期权
-- 弹性工作</div>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"现在我粘贴一段HR收到的原始JD文本，点击AI智能解析。注意右侧卡片——AI不仅提取了标题、薪资、技能要求这些显性信息，还自动识别了<strong>隐含需求</strong>：比如'架构师通常需带团队'、'抗压能力强可能意味着加班较多'。另外，完整度评分显示80%，并指出缺失了'团队规模、汇报对象、技术栈版本'等字段，帮助HR后续和业务方补充。"
-  </div>
-</div>
-
-<!-- Step 3 -->
-<div class="section">
-  <h2><span class="step-num">3</span>搜索候选人</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>JD解析完成后，HR小王需要从已授权候选人库中找到匹配的人选。系统会基于职位需求自动构建搜索条件。</p>
-  </div>
-  <ol class="steps">
-    <li>切换到 <strong>「候选人」</strong> 标签页</li>
-    <li>可以看到候选人列表，每条记录都标注了 <strong>「已授权」</strong> 状态 <span class="hint">合规前提</span></li>
-    <li>在搜索框中输入关键词（如技能、城市）搜索候选人 <span class="hint">JD解析完成后系统会自动搜索并批量匹配</span></li>
-    <li>观察搜索结果：候选人姓名脱敏展示（如"李*"），敏感信息受保护</li>
-  </ol>
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"JD录入后，我们在候选人库中搜索匹配人选。注意两个合规要点：第一，搜索结果<strong>只返回已授权的候选人</strong>，未授权的不会出现；第二，候选人姓名做了脱敏处理，如'张*'，保护个人隐私。这是系统合规设计的第一道关卡。"
-  </div>
-</div>
-
-<!-- Step 4 -->
-<div class="section">
-  <h2><span class="step-num">4</span>智能匹配评分</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>搜索到候选人后，HR小王需要评估每位候选人与岗位的匹配程度。系统提供批量预筛 + LLM深度分析两级评分。</p>
-  </div>
-  <ol class="steps">
-    <li>在 <strong>「智能匹配」</strong> 标签页，选择一个职位（如「前端架构师」）和候选人</li>
-    <li>点击 <strong>「开始智能匹配」</strong>，系统对所选候选人进行六维评分 <span class="hint">3秒内出结果</span></li>
-    <li>查看匹配结果列表，按综合评分排序</li>
-    <li>对高分候选人，可再次选择该候选人点击 <strong>「开始智能匹配」</strong>，触发LLM逐人深度分析 <span class="hint">5-10秒</span></li>
-    <li>展示雷达图：6个维度可视化对比</li>
-  </ol>
-
-  <h3>六维评分体系</h3>
-  <table class="data-table">
-    <thead>
-      <tr><th>维度</th><th>权重</th><th>评估要点</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><strong>技能匹配</strong></td><td>35%</td><td>必需技能命中率、语义等价识别（Vue≈React）</td></tr>
-      <tr><td><strong>经验匹配</strong></td><td>25%</td><td>年限达标、行业/项目相关性</td></tr>
-      <tr><td><strong>薪资匹配</strong></td><td>15%</td><td>候选人期望与岗位范围交集</td></tr>
-      <tr><td><strong>地域匹配</strong></td><td>10%</td><td>当前/意向城市与岗位城市一致</td></tr>
-      <tr><td><strong>到岗匹配</strong></td><td>10%</td><td>可到岗时间与紧急程度适配</td></tr>
-      <tr><td><strong>稳定性评估</strong></td><td>5%</td><td>年均跳槽频率（越低越稳定）</td></tr>
-    </tbody>
-  </table>
-
-  <h3>评分色彩规则</h3>
-  <table class="data-table">
-    <thead><tr><th>分数段</th><th>颜色</th><th>等级</th><th>建议</th></tr></thead>
-    <tbody>
-      <tr><td>90-100</td><td><span class="score-bar score-emerald" style="width:100px"></span></td><td>优秀</td><td>优先推荐</td></tr>
-      <tr><td>70-89</td><td><span class="score-bar score-blue" style="width:80px"></span></td><td>良好</td><td>建议沟通</td></tr>
-      <tr><td>50-69</td><td><span class="score-bar score-amber" style="width:60px"></span></td><td>一般</td><td>可考虑</td></tr>
-      <tr><td>0-49</td><td><span class="score-bar score-red" style="width:40px"></span></td><td>不匹配</td><td>暂缓</td></tr>
-    </tbody>
-  </table>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"JD解析完成后，系统自动对所有授权候选人完成批量六维评分——看这个结果，张明88分、李华72分，3秒就出来了。如果想深入了解某位候选人，在智能匹配页选择职位和候选人，点击开始智能匹配，LLM会结合知识库做更细致的评估，识别出他的'架构设计经验'和'微前端能力'是核心优势，同时也指出'团队管理经验'是待确认项。这个<strong>规则批量预筛 + LLM深度分析</strong>的两级架构，保证了速度和精度。"
-  </div>
-</div>
-
-<!-- Step 5 -->
-<div class="section">
-  <h2><span class="step-num">5</span>生成沟通话术</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>匹配完成后，HR小王要联系高分候选人。系统基于匹配结果自动生成个性化沟通话术，千人千面。</p>
-  </div>
-  <ol class="steps">
-    <li>在匹配结果中，找到高分候选人</li>
-    <li>点击 <strong>「生成话术」</strong> 按钮 <span class="hint">5-10秒流式输出</span></li>
-    <li>观察话术内容：包含候选人姓名、公司、核心技能等个性化信息</li>
-    <li>可点击 <strong>「复制」</strong> 直接用于微信/邮件发送</li>
-  </ol>
-
-  <h3>话术生成示例（实际演示输出）</h3>
-  <div class="talk-script">
-    张三你好，我是负责前端架构师岗位招聘的HR。了解到你在阿里担任高级前端工程师5年，精通React和TypeScript，还有大型项目架构经验，技术视野和能力都很出色。<br><br>
-    我们在北京的前端架构师岗位正需要你这样的技术人才，薪资40-60K，还有六险一金、股票期权和弹性工作等福利，完全匹配你的核心技能和经验背景。想和你详细聊聊岗位的架构设计需求和团队情况，方便电话沟通吗？
-  </div>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"点击生成话术，AI会根据匹配分析结果，自动撰写一段个性化沟通内容。注意这段话术不是模板套用——它提到了'阿里''5年''React和TypeScript'这些来自候选人真实简历的关键词，同时结合了岗位的'六险一金''股票期权'等福利亮点。HR可以直接复制发微信或邮件，大幅提升首次触达的回复率。"
-  </div>
-</div>
-
-<!-- Step 6 -->
-<div class="section">
-  <h2><span class="step-num">6</span>看板状态跟进</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>HR小王已经联系了多位候选人，需要在系统中更新他们的招聘状态，跟踪整体进展。</p>
-  </div>
-  <ol class="steps">
-    <li>切换到 <strong>「看板」</strong> 标签页</li>
-    <li>查看候选人在各状态列的分布：<strong>待接触 / 已联系 / 面试中 / 已发Offer / 已录用</strong></li>
-    <li>点击候选人卡片的 <strong>「状态更新」</strong>，将"待接触"改为"已联系"</li>
-    <li>点击候选人卡片的 <strong>状态按钮</strong>（如「已联系」「安排面试」「发Offer」），推进招聘流程</li>
-    <li>回到首页看板，观察统计数字实时更新</li>
-  </ol>
-
-  <h3>状态流转</h3>
-  <div class="security-flow">
-    <span class="node" style="border-color:var(--gray-500)">待接触</span><span class="arrow">→</span>
-    <span class="node" style="border-color:var(--blue-500)">已联系</span><span class="arrow">→</span>
-    <span class="node" style="border-color:var(--amber-500)">面试中</span><span class="arrow">→</span>
-    <span class="node" style="border-color:#8B5CF6">已发Offer</span><span class="arrow">→</span>
-    <span class="node" style="border-color:var(--emerald-500)">已录用</span>
-  </div>
-  <div class="security-flow" style="margin-top: 4px">
-    <span style="font-size:13px;color:var(--gray-500)">任意阶段均可 →</span>
-    <span class="node" style="border-color:var(--red-500)">已拒绝</span>
-    <span style="font-size:13px;color:var(--gray-500)">或</span>
-    <span class="node" style="border-color:#64748B">已撤回</span>
-  </div>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"切到看板视图，所有候选人的招聘进度一目了然。点击候选人卡片上的状态按钮，如「已联系」「安排面试」「发Offer」，即可推进流程，系统会自动记录状态变更时间和操作人。回到首页看板，统计数字也会实时更新——这让招聘团队的管理者随时掌握全局进度。"
-  </div>
-</div>
-
-<!-- Step 7 -->
-<div class="section">
-  <h2><span class="step-num">7</span>授权撤回与数据安全</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>候选人王芳表示不再考虑该岗位，并要求撤回个人信息授权。HR小王需要在系统中执行撤回操作，确保合规。</p>
-  </div>
-  <ol class="steps">
-    <li>在候选人列表中找到目标候选人</li>
-    <li>点击 <strong>「撤回授权」</strong> 按钮</li>
-    <li>在弹出的确认框中确认撤回</li>
-    <li>确认撤回后，观察候选人信息变为脱敏状态：<strong>姓名变"***"、邮箱变"***@***.***"、电话变"***********"</strong></li>
-    <li>同时，授权记录标记为 <strong>is_active: false</strong>，审计日志完整记录操作</li>
-  </ol>
-
-  <h3>数据安全架构</h3>
-  <div class="security-flow">
-    <span class="node">明文输入</span><span class="arrow">→</span>
-    <span class="node" style="border-color:var(--emerald-500)">AES-256-GCM 加密</span><span class="arrow">→</span>
-    <span class="node">密文存储 (DB)</span><span class="arrow">→</span>
-    <span class="node" style="border-color:var(--blue-500)">读取时解密</span><span class="arrow">→</span>
-    <span class="node">脱敏展示</span>
-  </div>
-
-  <h3>加密字段覆盖</h3>
-  <table class="data-table">
-    <thead><tr><th>字段</th><th>加密方式</th><th>可检索</th></tr></thead>
-    <tbody>
-      <tr><td>姓名 name</td><td>AES-256-GCM</td><td>否（解密后模糊搜索）</td></tr>
-      <tr><td>邮箱 email</td><td>AES-256-GCM</td><td>HMAC-SHA256 精确匹配</td></tr>
-      <tr><td>电话 phone</td><td>AES-256-GCM</td><td>HMAC-SHA256 精确匹配</td></tr>
-      <tr><td>当前公司 current_company</td><td>AES-256-GCM</td><td>否</td></tr>
-      <tr><td>当前职位 current_position</td><td>AES-256-GCM</td><td>否</td></tr>
-      <tr><td>简历文本 resume_text</td><td>AES-256-GCM</td><td>否</td></tr>
-    </tbody>
-  </table>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"这是系统最关键的合规功能。点击撤回授权，候选人所有敏感信息立即变为脱敏值——姓名变成星号，邮箱和电话不可识别。但脱敏后的统计记录仍然保留，不影响数据分析和合规审计。<br><br>
-    底层实现上，所有敏感字段存储时就是AES-256-GCM加密的，密文格式是'enc:v1:aes256gcm:...'。撤回时直接用脱敏值覆盖密文，确保<strong>物理层面数据不可恢复</strong>。同时，邮箱和电话还有HMAC签名，支持精确查重而不暴露明文。这套方案满足《个人信息保护法》的'可撤回'和'可删除'要求。"
-  </div>
-</div>
-
-<!-- Step 8 -->
-<div class="section">
-  <h2><span class="step-num">8</span>效率对比总结</h2>
-  <div class="scenario">
-    <div class="label">演示场景</div>
-    <p>向客户展示使用智聘Agent前后的效率提升数据。</p>
-  </div>
-
-  <table class="data-table">
-    <thead>
-      <tr><th>指标</th><th>传统手动</th><th>智聘Agent</th><th>提升幅度</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>简历筛选时间</td><td>30min/人</td><td>3min/人</td><td><strong>90%↓</strong></td></tr>
-      <tr><td>日均处理职位</td><td>3-5个</td><td>15-20个</td><td><strong>4x</strong></td></tr>
-      <tr><td>匹配准确率</td><td>60%</td><td>85%</td><td><strong>+25%</strong></td></tr>
-      <tr><td>单职位招聘成本</td><td>5000元</td><td>1200元</td><td><strong>76%↓</strong></td></tr>
-      <tr><td>候选人首次回复率</td><td>15%</td><td>45%</td><td><strong>3x</strong></td></tr>
-    </tbody>
-  </table>
-
-  <div class="talk-script">
-    <span class="speaker">演示话术：</span>"最后做一个效率预期对比。传统模式下，HR筛选一份简历平均30分钟，每天最多处理5个职位。用了智聘Agent后，批量匹配3秒完成，话术一键生成，预期日均处理量可提升到15-20个职位。匹配准确率方面，AI能做语义等价识别——比如JD要React，候选人写的是Vue，系统知道这俩是同类技术框架，预期准确率可从60%提升到85%。这些数据基于内部测算，实际效果会随使用深度持续优化。"
-  </div>
-</div>
-
-<!-- FAQ -->
-<div class="section">
-  <h2>客户常见问题 & 应答口径</h2>
-  <table class="data-table">
-    <thead><tr><th style="width:40%">问题</th><th>建议回答</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>候选人数据安全吗？</td>
-        <td>所有敏感字段（姓名、邮箱、电话、公司、职位、简历）入库时即进行<strong>AES-256-GCM加密</strong>，密钥通过环境变量管理，数据库中不存在明文。邮箱和电话额外存储HMAC签名用于精确查重。</td>
-      </tr>
-      <tr>
-        <td>候选人撤回授权后数据怎么办？</td>
-        <td>撤回后敏感信息被脱敏值覆盖（物理不可恢复），但统计记录保留。授权记录标记为inactive，审计日志完整记录操作人和时间。满足《个人信息保护法》要求。</td>
-      </tr>
-      <tr>
-        <td>匹配评分准确吗？</td>
-        <td>采用<strong>两级评估架构</strong>：批量预筛用六维规则评分（3秒完成），重点候选人再用LLM + 知识库做深度分析（5-10秒）。技能匹配支持语义等价识别（Vue≈React≈Angular）。</td>
-      </tr>
-      <tr>
-        <td>话术生成能个性化吗？</td>
-        <td>LLM基于候选人真实简历和匹配分析结果生成话术，融入姓名、公司、核心技能等个性化信息，并参考话术模板知识库调整风格。千人千面，非模板套用。</td>
-      </tr>
-      <tr>
-        <td>是否对接了外部招聘平台？</td>
-        <td>当前版本基于内部候选人库，已预留招聘平台API对接接口。后续可接入Boss直聘、猎聘等平台数据源。</td>
-      </tr>
-      <tr>
-        <td>系统权限怎么控制？</td>
-        <td>采用RBAC权限模型，区分admin/HR/system三级角色。JWT认证 + 中间件拦截，确保HR只能操作授权范围内的数据。</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
-<!-- Demo Tips -->
-<div class="section">
-  <h2>演示注意事项</h2>
-  <ol class="steps">
-    <li><strong>提前准备</strong>：演示前5分钟打开系统，确认服务正常，执行一次完整流程</li>
-    <li><strong>网络检查</strong>：确保演示环境网络通畅，LLM调用需要外部API</li>
-    <li><strong>话术生成时间</strong>：LLM流式输出约5-10秒，演示时可以边等边讲解原理</li>
-    <li><strong>批量匹配</strong>：3秒内完成，可以重点展示速度优势</li>
-    <li><strong>撤回授权</strong>：这是合规亮点，务必演示，可提前准备一个"待撤回"的候选人</li>
-    <li><strong>浏览器建议</strong>：使用Chrome，打开开发者工具Network面板可展示API调用细节</li>
-    <li><strong>备用方案</strong>：如遇LLM超时，可展示已有的匹配记录和话术（数据库中已有历史数据）</li>
-  </ol>
-</div>
-
-</div>
+  <footer>智聘Agent · 私有部署 · 人工负责 · 证据可追溯</footer>
 </body>
 </html>

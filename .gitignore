@@ -121,6 +121,7 @@ test-results/
 # Temporary files
 *.tmp
 *.temp
+/tmp/
 .tmp/
 .temp/
 
@@ -148,6 +149,8 @@ design-qa.md
 /docs/GOAI初赛提交前待办清单_2026-08-05.md
 /docs/GOAI无界应用_官方材料对照整体评估_20260805.md
 /docs/视频拍摄前置走查清单.md
+/docs/人才决策Agent_系统演示.pptx
+/docs/卓越际联_*
 
 # GOAI official materials (not for public repo)
 /docs/无界应用-参赛指南.pdf

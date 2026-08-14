@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getTenantRequestContext } from '@/lib/auth-server';
 import { SMALL_JSON_BODY_LIMIT, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
+import { rpcErrorToRequestError } from '@/lib/recruiting/api-contracts';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({
@@ -69,7 +70,16 @@ export async function POST(request: NextRequest) {
         p_job_id: body.job_id,
         p_action: body.action,
       });
-      if (error) throw new Error(`更新职位状态失败: ${error.message}`);
+      if (error) {
+        console.error('更新职位状态失败:', {
+          job_id: body.job_id,
+          action: body.action,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+        });
+        throw rpcErrorToRequestError(error, '更新职位状态失败，请刷新页面后重试');
+      }
       return NextResponse.json({ success: true, data });
     }
     const completedFields = [body.title, body.department, body.location, body.experience_required, body.education_required, body.skills_required.length > 0]
@@ -103,6 +113,7 @@ export async function POST(request: NextRequest) {
     if (error) throw new Error(`创建职位标准失败: ${error.message}`);
     return NextResponse.json({ success: true, data }, { status: 201 });
   } catch (error) {
-    return apiErrorResponse(error, '保存职位标准失败');
+    console.error('职位操作失败:', error);
+    return apiErrorResponse(error, '职位操作失败');
   }
 }

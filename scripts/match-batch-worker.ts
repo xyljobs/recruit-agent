@@ -181,8 +181,25 @@ async function processTask(
         },
       );
       const scores = calculateBaseMatchScore(
-        scoringInput.job,
-        scoringInput.candidate,
+        {
+          ...scoringInput.job,
+          raw_jd: typeof job.raw_jd === 'string' ? job.raw_jd : null,
+        },
+        {
+          ...scoringInput.candidate,
+          resume_text: typeof scoringCandidate.resume_text === 'string'
+            ? scoringCandidate.resume_text
+            : null,
+          verified_experience_years: nullableNumber(
+            scoringCandidate.verified_experience_years,
+          ),
+          experience_years_status: typeof scoringCandidate.experience_years_status === 'string'
+            ? scoringCandidate.experience_years_status
+            : null,
+          experience_years_evidence: typeof scoringCandidate.experience_years_evidence === 'string'
+            ? scoringCandidate.experience_years_evidence
+            : null,
+        },
         activeScoringWeights.weights,
       );
 
@@ -316,6 +333,7 @@ async function processTask(
       });
     } else {
       matches = [...scoredResultByCandidate.values()]
+        .filter(score => score.match_details.manufacturing_analysis?.hard_fail !== true)
         .sort((left, right) => (
           right.overall_score - left.overall_score
           || left.candidate_id.localeCompare(right.candidate_id)
@@ -373,6 +391,13 @@ async function loadCandidateIds(
     throw new Error(`查询候选人范围失败: ${error.message}`);
   }
   return (data || []).map(candidate => candidate.id);
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function main(): Promise<void> {

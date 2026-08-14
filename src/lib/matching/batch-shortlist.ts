@@ -67,41 +67,43 @@ export function buildBatchShortlistEntries(
     candidate,
   ]));
 
-  const prepared = input.scores.map(score => {
-    const candidate = candidatesById.get(score.candidate_id) ?? {};
-    const criteria = buildCriteria(input.job, candidate, score);
-    const configuredCriteria = criteria.filter(criterion => hasValue(criterion.job_value));
-    const evidencedCriteria = configuredCriteria.filter(criterion => hasValue(criterion.candidate_value));
-    const evidenceCoverage = percentage(evidencedCriteria.length, configuredCriteria.length);
-    const evidence = createEvidenceSnapshot(
-      criteria
-        .filter(criterion => hasValue(criterion.job_value) || hasValue(criterion.candidate_value))
-        .map(toStructuredEvidence),
-    );
-    const candidateMissing = missingCandidateInformation(candidate);
-    const jobMissing = missingJobInformation(input.job);
-    const confidence = calculateConfidence({
-      jd_completeness: numericPercentage(input.job.completeness)
-        ?? percentage(7 - jobMissing.length, 7),
-      candidate_completeness: percentage(7 - candidateMissing.length, 7),
-      evidence_coverage: evidenceCoverage,
-      updated_at: dateValue(candidate.updated_at ?? candidate.created_at),
-      resume_text: nullableText(candidate.resume_text),
-      has_critical_conflicts: candidate.has_critical_conflicts === true,
-      now: input.now,
-      missing_information: [...jobMissing, ...candidateMissing],
-    });
+  const prepared = input.scores
+    .filter(score => score.match_details.manufacturing_analysis?.hard_fail !== true)
+    .map(score => {
+      const candidate = candidatesById.get(score.candidate_id) ?? {};
+      const criteria = buildCriteria(input.job, candidate, score);
+      const configuredCriteria = criteria.filter(criterion => hasValue(criterion.job_value));
+      const evidencedCriteria = configuredCriteria.filter(criterion => hasValue(criterion.candidate_value));
+      const evidenceCoverage = percentage(evidencedCriteria.length, configuredCriteria.length);
+      const evidence = createEvidenceSnapshot(
+        criteria
+          .filter(criterion => hasValue(criterion.job_value) || hasValue(criterion.candidate_value))
+          .map(toStructuredEvidence),
+      );
+      const candidateMissing = missingCandidateInformation(candidate);
+      const jobMissing = missingJobInformation(input.job);
+      const confidence = calculateConfidence({
+        jd_completeness: numericPercentage(input.job.completeness)
+          ?? percentage(7 - jobMissing.length, 7),
+        candidate_completeness: percentage(7 - candidateMissing.length, 7),
+        evidence_coverage: evidenceCoverage,
+        updated_at: dateValue(candidate.updated_at ?? candidate.created_at),
+        resume_text: nullableText(candidate.resume_text),
+        has_critical_conflicts: candidate.has_critical_conflicts === true,
+        now: input.now,
+        missing_information: [...jobMissing, ...candidateMissing],
+      });
 
-    return {
-      candidate_id: score.candidate_id,
-      match_record_id: score.match_record_id,
-      overall_score: score.overall_score,
-      confidence_score: confidence.confidence_score,
-      confidence_breakdown: confidence.confidence_breakdown,
-      evidence_snapshot: evidence,
-      missing_information: confidence.missing_information,
-    };
-  });
+      return {
+        candidate_id: score.candidate_id,
+        match_record_id: score.match_record_id,
+        overall_score: score.overall_score,
+        confidence_score: confidence.confidence_score,
+        confidence_breakdown: confidence.confidence_breakdown,
+        evidence_snapshot: evidence,
+        missing_information: confidence.missing_information,
+      };
+    });
 
   return rankShortlist(prepared, input.top_n).map(entry => ({
     candidate_id: entry.candidate_id,

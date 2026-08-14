@@ -1,12 +1,15 @@
 import { SCORE_WEIGHTS } from '@/storage/database/shared/schema';
 import { matchLlmSupplementSchema } from '@/lib/ai/match-scoring';
+import { calculateManufacturingMatchScore } from './manufacturing-scorer';
 
 export { SCORE_WEIGHTS };
 
-export const BASE_SCORING_MODEL = 'explainable-base-v1';
+export const BASE_SCORING_MODEL = 'explainable-base-v2';
 export type MatchScoreWeights = Record<keyof typeof SCORE_WEIGHTS, number>;
 
 export interface MatchJobInput {
+  title?: string | null;
+  raw_jd?: string | null;
   skills_required?: readonly string[] | null;
   bonus_skills?: readonly string[] | null;
   experience_required?: string | null;
@@ -29,6 +32,10 @@ export interface MatchCandidateInput {
   preferred_locations?: readonly string[] | null;
   availability?: string | null;
   job_change_frequency?: string | number | null;
+  resume_text?: string | null;
+  verified_experience_years?: number | null;
+  experience_years_status?: string | null;
+  experience_years_evidence?: string | null;
 }
 
 export interface MatchEvidence {
@@ -62,6 +69,7 @@ export interface MatchDetails {
     match: boolean;
   };
   llm_supplement?: MatchLlmSupplement;
+  manufacturing_analysis?: import('@/lib/matching/manufacturing-scorer').ManufacturingAnalysis;
 }
 
 export interface BaseMatchScore {
@@ -85,6 +93,9 @@ export function calculateBaseMatchScore(
   candidate: MatchCandidateInput,
   weights: MatchScoreWeights = SCORE_WEIGHTS,
 ): BaseMatchScore {
+  const manufacturingScore = calculateManufacturingMatchScore(job, candidate);
+  if (manufacturingScore) return manufacturingScore;
+
   const requiredSkills = [...(job.skills_required ?? [])];
   const bonusSkills = [...(job.bonus_skills ?? [])];
   const candidateSkills = [...(candidate.skills ?? [])];

@@ -53,6 +53,37 @@ function score(candidateId: string, overall: number) {
   };
 }
 
+function hardFailScore(candidateId: string) {
+  return {
+    ...score(candidateId, 100),
+    match_details: {
+      ...details,
+      manufacturing_analysis: {
+        role_id: 'MFG-MNT-V1' as const,
+        standard_version: 'manufacturing-frozen-v1' as const,
+        hard_fail: true,
+        hard_gates: [
+          {
+            code: 'H2',
+            name: '独立故障诊断',
+            result: 'FAIL' as const,
+            evidence: ['只有设备采购和资产管理证据'],
+          },
+        ],
+        criteria: [],
+        total_score: 50,
+        experience_review: {
+          status: 'confirmed' as const,
+          years: 4,
+          source: 'HR年限复核',
+          evidence: null,
+        },
+        pending_business_checks: ['工作地点', '薪资期望', '倒班接受性', '到岗时间'],
+      },
+    },
+  };
+}
+
 function candidate(id: string, resumeText: string | null = '完整简历正文') {
   return {
     id,
@@ -112,4 +143,16 @@ test('truncates evidence excerpts to 200 Unicode characters', () => {
     assert.ok([...(evidence.candidate_excerpt ?? '')].length <= 200);
     assert.ok([...(evidence.job_excerpt ?? '')].length <= 200);
   }
+});
+
+test('excludes a manufacturing hard fail before shortlist ranking', () => {
+  const entries = buildBatchShortlistEntries({
+    job: fullJob,
+    candidates: [candidate('eligible'), candidate('hard-fail')],
+    scores: [score('eligible', 70), hardFailScore('hard-fail')],
+    top_n: 2,
+    now: '2026-08-01T00:00:00.000Z',
+  });
+
+  assert.deepEqual(entries.map(entry => entry.candidate_id), ['eligible']);
 });

@@ -42,7 +42,8 @@ interface ParsedAnnotation {
 }
 
 interface ExperienceReview {
-  confirmedYears: number;
+  confirmedYears: number | null;
+  status: 'confirmed' | 'partial' | 'unknown';
   decision: string;
   evidence: string;
   reviewer: string;
@@ -158,16 +159,27 @@ function parseExperienceReviews(
     const candidateId = readText(row, 'candidate_id');
     if (!candidateId) continue;
     const confirmedYears = readNumber(row, 'HR确认年限');
-    if (confirmedYears === null || confirmedYears < 0) {
-      throw new Error(`年限复核/${candidateId} 缺少有效的HR确认年限`);
-    }
     const decision = readText(row, '处理结论');
     const evidence = readText(row, '复核依据');
     const reviewer = readText(row, '复核人');
     if (!decision || !evidence || !reviewer) {
       throw new Error(`年限复核/${candidateId} 必须填写处理结论、复核依据和复核人`);
     }
-    result.set(candidateId, { confirmedYears, decision, evidence, reviewer });
+    const status = decision.includes('部分确认')
+      ? 'partial'
+      : decision.includes('无法确认')
+        ? 'unknown'
+        : 'confirmed';
+    if (status === 'confirmed' && (confirmedYears === null || confirmedYears < 0)) {
+      throw new Error(`年限复核/${candidateId} 的确认结论缺少有效年限`);
+    }
+    result.set(candidateId, {
+      confirmedYears: status === 'confirmed' ? confirmedYears : null,
+      status,
+      decision,
+      evidence,
+      reviewer,
+    });
   }
   return result;
 }
@@ -229,7 +241,13 @@ function main(): void {
 
     const experienceReview = experienceReviews.get(candidate.id);
     const profile = experienceReview
-      ? { ...candidate.profile, experience_years: experienceReview.confirmedYears }
+      ? {
+          ...candidate.profile,
+          experience_years: experienceReview.confirmedYears,
+          verified_experience_years: experienceReview.confirmedYears,
+          experience_years_status: experienceReview.status,
+          experience_years_evidence: experienceReview.evidence,
+        }
       : candidate.profile;
     return {
       ...candidate,

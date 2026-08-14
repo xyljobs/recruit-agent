@@ -220,6 +220,7 @@ export function JobWorkspace() {
       await reloadJobs();
       toast.success(action === 'activate' ? '职位已启用' : '职位已关闭');
     } catch (error) {
+      await reloadJobs();
       toast.error(error instanceof Error ? error.message : '职位状态更新失败');
     }
   }
@@ -237,6 +238,7 @@ export function JobWorkspace() {
       toast.success('短名单任务已提交');
       router.push('/shortlists');
     } catch (error) {
+      await reloadJobs();
       toast.error(error instanceof Error ? error.message : '短名单任务提交失败');
     } finally {
       setGeneratingJobId(null);

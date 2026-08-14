@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS candidates (
   resume_url VARCHAR(500),
   skills JSONB DEFAULT '[]',
   experience_years INTEGER DEFAULT 0,
+  verified_experience_years NUMERIC(4,1),
+  experience_years_status VARCHAR(30),
+  experience_years_evidence TEXT,
   education VARCHAR(50),
   current_company VARCHAR(255),
   current_position VARCHAR(255),
@@ -1299,6 +1302,11 @@ WHERE NOT EXISTS (
   WHERE existing_event.match_record_id = match_record.id
 );
 
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS verified_experience_years NUMERIC(4,1),
+  ADD COLUMN IF NOT EXISTS experience_years_status VARCHAR(30),
+  ADD COLUMN IF NOT EXISTS experience_years_evidence TEXT;
+
 DROP FUNCTION IF EXISTS create_candidate_with_authorization_and_audit(JSONB, JSONB);
 CREATE FUNCTION create_candidate_with_authorization_and_audit(
   p_candidate JSONB,
@@ -1335,6 +1343,9 @@ BEGIN
     resume_url,
     skills,
     experience_years,
+    verified_experience_years,
+    experience_years_status,
+    experience_years_evidence,
     education,
     current_company,
     current_position,
@@ -1360,6 +1371,9 @@ BEGIN
     candidate_input.resume_url,
     candidate_input.skills,
     candidate_input.experience_years,
+    candidate_input.verified_experience_years,
+    candidate_input.experience_years_status,
+    candidate_input.experience_years_evidence,
     candidate_input.education,
     candidate_input.current_company,
     candidate_input.current_position,
@@ -3735,6 +3749,9 @@ BEGIN
           resume_url = COALESCE(v_candidate_input.resume_url, resume_url),
           skills = COALESCE(v_candidate_input.skills, skills),
           experience_years = COALESCE(v_candidate_input.experience_years, experience_years),
+          verified_experience_years = COALESCE(v_candidate_input.verified_experience_years, verified_experience_years),
+          experience_years_status = COALESCE(v_candidate_input.experience_years_status, experience_years_status),
+          experience_years_evidence = COALESCE(v_candidate_input.experience_years_evidence, experience_years_evidence),
           education = COALESCE(v_candidate_input.education, education),
           current_company = COALESCE(v_candidate_input.current_company, current_company),
           current_position = COALESCE(v_candidate_input.current_position, current_position),

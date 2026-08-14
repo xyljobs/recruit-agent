@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const MATCH_SCORING_INPUT_VERSION = 'match-scoring-input-v2';
+export const MATCH_SCORING_INPUT_VERSION = 'match-scoring-input-v3';
 
 const supplementTextSchema = z.string().trim().min(1).max(1000);
 const scoreSchema = z.number().int().min(0).max(100);
@@ -15,7 +15,7 @@ export const baseMatchScoreSchema = z.object({
   location_score: scoreSchema,
   availability_score: scoreSchema,
   stability_score: scoreSchema,
-  match_details: z.object({
+    match_details: z.object({
     strengths: z.array(detailTextSchema).max(20),
     gaps: z.array(detailTextSchema).max(20),
     recommendations: detailTextSchema,
@@ -29,12 +29,38 @@ export const baseMatchScoreSchema = z.object({
       job_range: z.string().trim().min(1).max(100),
       overlap: z.enum(['有交集', '无交集']),
     }).strict(),
-    location_analysis: z.object({
+      location_analysis: z.object({
       candidate_city: z.string().trim().min(1).max(100),
       job_city: z.string().trim().min(1).max(100),
       match: z.boolean(),
+      }).strict(),
+      manufacturing_analysis: z.object({
+        role_id: z.enum(['MFG-PLC-V1', 'MFG-ROB-V1', 'MFG-MNT-V1']),
+        standard_version: z.literal('manufacturing-frozen-v1'),
+        hard_fail: z.boolean(),
+        hard_gates: z.array(z.object({
+          code: z.string().trim().min(1).max(20),
+          name: detailTextSchema,
+          result: z.enum(['PASS', 'FAIL', 'UNKNOWN']),
+          evidence: z.array(detailTextSchema).max(10),
+        }).strict()).max(10),
+        criteria: z.array(z.object({
+          code: z.string().trim().min(1).max(20),
+          name: detailTextSchema,
+          weight: z.number().int().min(0).max(100),
+          score: scoreSchema,
+          evidence: z.array(detailTextSchema).max(10),
+        }).strict()).max(20),
+        total_score: scoreSchema,
+        experience_review: z.object({
+          status: z.enum(['confirmed', 'provided', 'partial', 'unknown']),
+          years: z.number().min(0).max(100).nullable(),
+          source: detailTextSchema,
+          evidence: detailTextSchema.nullable(),
+        }).strict(),
+        pending_business_checks: z.array(detailTextSchema).max(10),
+      }).strict().optional(),
     }).strict(),
-  }).strict(),
 }).strict();
 
 export const matchLlmSupplementSchema = z.object({
@@ -79,7 +105,7 @@ export interface MatchScoringInput {
   };
   candidate: {
     skills: string[];
-    experience_years: number;
+    experience_years: number | null;
     education: string;
     current_city: string;
     preferred_locations: string[];
@@ -87,7 +113,7 @@ export interface MatchScoringInput {
     salary_min: number | null;
     salary_max: number | null;
     availability: string;
-    job_change_frequency: number;
+    job_change_frequency: number | null;
   };
   references: {
     skills_knowledge: string;
@@ -120,7 +146,7 @@ export function buildMatchScoringInput(
     },
     candidate: {
       skills: toTextArray(candidate.skills, 100, 100),
-      experience_years: toNonNegativeNumber(candidate.experience_years),
+      experience_years: toNullableNonNegativeNumber(candidate.experience_years),
       education: toText(candidate.education, '未知', 100),
       current_city: toText(candidate.current_city, '未知', 100),
       preferred_locations: toTextArray(candidate.preferred_locations, 30, 100),
@@ -128,7 +154,7 @@ export function buildMatchScoringInput(
       salary_min: toNullableNumber(candidate.salary_min),
       salary_max: toNullableNumber(candidate.salary_max),
       availability: toText(candidate.availability, '未知', 50),
-      job_change_frequency: toNonNegativeNumber(candidate.job_change_frequency),
+      job_change_frequency: toNullableNonNegativeNumber(candidate.job_change_frequency),
     },
     references: {
       skills_knowledge: toText(references.skillsKnowledge, '暂无技能参考知识', 8000),
@@ -171,6 +197,7 @@ function toNullableNumber(value: unknown): number | null {
   return null;
 }
 
-function toNonNegativeNumber(value: unknown): number {
-  return Math.max(0, toNullableNumber(value) ?? 0);
+function toNullableNonNegativeNumber(value: unknown): number | null {
+  const number = toNullableNumber(value);
+  return number === null ? null : Math.max(0, number);
 }

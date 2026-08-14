@@ -182,6 +182,9 @@ export const candidates = pgTable(
     resume_url: varchar("resume_url", { length: 500 }),
     skills: jsonb("skills").$type<string[]>(),
     experience_years: integer("experience_years"),
+    verified_experience_years: numeric("verified_experience_years", { precision: 4, scale: 1 }),
+    experience_years_status: varchar("experience_years_status", { length: 30 }),
+    experience_years_evidence: text("experience_years_evidence"),
     education: varchar("education", { length: 100 }),
     current_company: varchar("current_company", { length: 255 }), // AES encrypted
     current_position: varchar("current_position", { length: 255 }), // AES encrypted
@@ -1106,6 +1109,9 @@ export const insertCandidateSchema = createCoercedInsertSchema(candidates).pick(
   resume_url: true,
   skills: true,
   experience_years: true,
+  verified_experience_years: true,
+  experience_years_status: true,
+  experience_years_evidence: true,
   education: true,
   current_company: true,
   current_position: true,

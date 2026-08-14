@@ -6,7 +6,7 @@ import {
   type MatchScoreWeights,
 } from '@/lib/matching/scorer';
 
-export const MATCH_RUN_SCHEMA_VERSION = 1;
+export const MATCH_RUN_SCHEMA_VERSION = 2;
 export const MATCH_WEIGHTS_VERSION = 'match-weights-v1';
 
 export type MatchExecutionMode = 'single' | 'batch';
@@ -61,6 +61,9 @@ const CANDIDATE_VERSION_FIELDS = [
   'resume_url',
   'skills',
   'experience_years',
+  'verified_experience_years',
+  'experience_years_status',
+  'experience_years_evidence',
   'education',
   'current_company',
   'current_position',

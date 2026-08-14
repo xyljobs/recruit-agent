@@ -298,8 +298,25 @@ export async function POST(request: NextRequest) {
       industryKnowledge,
     });
     const baseScore = calculateBaseMatchScore(
-      scoringInput.job,
-      scoringInput.candidate,
+      {
+        ...scoringInput.job,
+        raw_jd: typeof jobRecord.raw_jd === 'string' ? jobRecord.raw_jd : null,
+      },
+      {
+        ...scoringInput.candidate,
+        resume_text: typeof scoringCandidate.resume_text === 'string'
+          ? scoringCandidate.resume_text
+          : null,
+        verified_experience_years: toNullableNumber(
+          scoringCandidate.verified_experience_years,
+        ),
+        experience_years_status: typeof scoringCandidate.experience_years_status === 'string'
+          ? scoringCandidate.experience_years_status
+          : null,
+        experience_years_evidence: typeof scoringCandidate.experience_years_evidence === 'string'
+          ? scoringCandidate.experience_years_evidence
+          : null,
+      },
       activeScoringWeights.weights,
     );
     const validatedBaseScore = baseMatchScoreSchema.safeParse(baseScore);
@@ -519,4 +536,11 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

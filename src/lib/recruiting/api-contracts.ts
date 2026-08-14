@@ -140,6 +140,7 @@ export const communicationBriefBodySchema = z.strictObject({
 
 export interface RpcErrorLike {
   code?: string | null;
+  message?: string | null;
 }
 
 export function normalizeRecruitingApiError(
@@ -163,10 +164,17 @@ export function rpcErrorToRequestError(
   error: RpcErrorLike,
   fallbackMessage: string,
 ): ApiRequestError {
+  const message = error.message ?? '';
   switch (error.code) {
     case '23505':
       return new ApiRequestError('幂等键已用于不同请求', 409);
     case 'P0002':
+      if (message.includes('job is not active')) {
+        return new ApiRequestError('职位未启用或已关闭，请刷新页面确认职位状态后重试', 404);
+      }
+      if (message.includes('job not found')) {
+        return new ApiRequestError('职位不存在或已被删除，请刷新页面后重试', 404);
+      }
       return new ApiRequestError('请求的记录不存在', 404);
     case '22023':
       return new ApiRequestError('请求不符合业务规则', 400);

@@ -35,6 +35,9 @@ export interface Candidate {
   current_company: string | null;
   current_position: string | null;
   experience_years: number | null;
+  verified_experience_years?: number | null;
+  experience_years_status?: 'confirmed' | 'partial' | 'unknown' | null;
+  experience_years_evidence?: string | null;
   education: string | null;
   skills: string[] | null;
   resume_text: string | null;
@@ -160,6 +163,9 @@ export interface CandidateForm {
   current_company: string;
   current_position: string;
   experience_years: number;
+  verified_experience_years?: number | null;
+  experience_years_status?: 'confirmed' | 'partial' | 'unknown' | null;
+  experience_years_evidence?: string;
   education: string;
   skills: string[];
   resume_text: string;

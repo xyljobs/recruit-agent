@@ -48,6 +48,8 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .pnpm-store/
 .agents/
 .codex/
+.codex-spreadsheet-work/
+.qoder/
 .omx/
 .parcel-cache/
 .eslintcache
@@ -96,6 +98,7 @@ assets/boss_search_tasks.json
 
 # Local resumes and generated reports
 /简历/
+/docs/简历/
 /private-evaluation/
 /tmp/pdfs/
 /resume-*/

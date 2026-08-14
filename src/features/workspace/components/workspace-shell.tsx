@@ -7,6 +7,7 @@ import {
   BriefcaseBusiness,
   Database,
   FileText,
+  Library,
   LogOut,
   MessageSquareText,
   ShieldCheck,
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { href: '/jobs', label: '职位与标准', icon: FileText },
   { href: '/shortlists', label: '候选人短名单', icon: BriefcaseBusiness },
   { href: '/outcomes', label: '沟通与结果', icon: MessageSquareText },
+  { href: '/interview-bank', label: '面试题库', icon: Library },
   { href: '/data-sources', label: '数据源', icon: Database },
 ] as const;
 

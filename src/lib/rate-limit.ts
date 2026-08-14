@@ -9,6 +9,9 @@ export interface RateLimitPolicy {
 export const RATE_LIMITS = {
   candidateList: { scope: 'candidates:list' },
   jdParse: { scope: 'jd:parse' },
+  interviewGuide: { scope: 'interview:guide' },
+  interviewBankRead: { scope: 'interview:bank:read' },
+  interviewBankWrite: { scope: 'interview:bank:write' },
   bossKeywords: { scope: 'boss:keywords' },
   bossExecute: { scope: 'boss:execute' },
   batchMatchSubmit: { scope: 'match:batch:submit' },

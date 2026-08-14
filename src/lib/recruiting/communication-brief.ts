@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { extractJsonObject } from '@/lib/ai/json';
 
 const briefItemSchema = z.string().trim().min(1).max(300);
 
@@ -84,15 +85,6 @@ export function parseModelCommunicationBrief(value: string): CommunicationBriefC
       ...parsed.prohibited_claims,
     ], 8),
   };
-}
-
-function extractJsonObject(value: string): string {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const candidate = (fenced ?? value).trim();
-  const start = candidate.indexOf('{');
-  const end = candidate.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('模型未返回结构化沟通 brief');
-  return candidate.slice(start, end + 1);
 }
 
 function uniqueBoundedStrings(values: readonly unknown[], limit: number): string[] {

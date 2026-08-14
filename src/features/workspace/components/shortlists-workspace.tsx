@@ -7,8 +7,11 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
+  ClipboardList,
+  Copy,
   FileWarning,
   MessageSquareText,
+  Printer,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -54,6 +57,68 @@ interface PreparedCommunicationBrief {
   interview_questions: string[];
   prohibited_claims: string[];
   review_status?: string;
+}
+
+interface InterviewGuideContent {
+  focus_areas: Array<{ dimension: string; why: string; must_verify: boolean }>;
+  common_questions: Array<{ bank_id: string; question: string; dimension: string }>;
+  targeted_questions: Array<{
+    question: string;
+    dimension: string;
+    origin: 'evidence_gap' | 'depth_check' | 'boundary_risk' | 'resume_probe';
+    expected_signals: string[];
+    probe_followups: string[];
+    scoring_anchors: string[];
+  }>;
+  red_flags_to_check: string[];
+  interview_loop: Array<{ round: number; focus: string; minutes: number; interviewer_role: string }>;
+  prohibited_topics: string[];
+}
+
+interface PreparedInterviewGuide {
+  guide: { id: string; ai_mode: string } | null;
+  content: InterviewGuideContent;
+  candidate_name: string;
+}
+
+const GUIDE_ORIGIN_LABELS: Record<InterviewGuideContent['targeted_questions'][number]['origin'], { label: string; className: string }> = {
+  evidence_gap: { label: '证据缺口', className: 'bg-amber-100 text-amber-800' },
+  depth_check: { label: '证据深挖', className: 'bg-blue-100 text-blue-800' },
+  boundary_risk: { label: '边界风险', className: 'bg-violet-100 text-violet-800' },
+  resume_probe: { label: '简历追问', className: 'bg-emerald-100 text-emerald-800' },
+};
+
+function guideToPlainText(guide: InterviewGuideContent, candidateName: string): string {
+  const lines: string[] = [];
+  lines.push(`面试提纲：${candidateName}`);
+  lines.push('');
+  lines.push('一、考察重点');
+  guide.focus_areas.forEach((area, index) => {
+    lines.push(`${index + 1}. ${area.dimension}${area.must_verify ? '（必须核实）' : ''}：${area.why}`);
+  });
+  lines.push('');
+  lines.push('二、公共必问题（来自 HR 题库，未经 AI 改写）');
+  guide.common_questions.forEach((item, index) => {
+    lines.push(`${index + 1}. [${item.dimension}] ${item.question}`);
+  });
+  lines.push('');
+  lines.push('三、候选人专项题');
+  guide.targeted_questions.forEach((item, index) => {
+    lines.push(`${index + 1}. [${item.dimension}] ${item.question}`);
+    if (item.expected_signals.length > 0) lines.push(`   期望信号：${item.expected_signals.join('；')}`);
+    if (item.probe_followups.length > 0) lines.push(`   追问路径：${item.probe_followups.join('；')}`);
+    if (item.scoring_anchors.length > 0) lines.push(`   打分锚点：${item.scoring_anchors.join('；')}`);
+  });
+  lines.push('');
+  lines.push('四、风险核查');
+  guide.red_flags_to_check.forEach(item => lines.push(`- ${item}`));
+  lines.push('');
+  lines.push('五、面试轮次建议');
+  guide.interview_loop.forEach(item => lines.push(`- 第 ${item.round} 轮（${item.minutes} 分钟，${item.interviewer_role}）：${item.focus}`));
+  lines.push('');
+  lines.push('六、禁问提示');
+  lines.push(guide.prohibited_topics.join('、'));
+  return lines.join('\n');
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -103,6 +168,8 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
   const [saving, setSaving] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [brief, setBrief] = useState<PreparedCommunicationBrief | null>(null);
+  const [guidePreparing, setGuidePreparing] = useState(false);
+  const [guide, setGuide] = useState<PreparedInterviewGuide | null>(null);
 
   const verdict = useMemo(() => {
     const skillAnalysis = entry.match_details?.skill_analysis;
@@ -173,6 +240,35 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
       toast.error(error instanceof Error ? error.message : '沟通内容准备失败');
     } finally {
       setPreparing(false);
+    }
+  }
+
+  async function prepareInterviewGuide() {
+    setGuidePreparing(true);
+    try {
+      const response = await authFetch('/api/interview/guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shortlist_entry_id: entry.id, client_event_id: crypto.randomUUID() }),
+      });
+      const result: { success?: boolean; data?: PreparedInterviewGuide; error?: string } = await response.json();
+      if (!response.ok || !result.success || !result.data) throw new Error(result.error || '面试提纲生成失败');
+      setGuide(result.data);
+      toast.success('面试提纲已生成，请人工确认后使用');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '面试提纲生成失败');
+    } finally {
+      setGuidePreparing(false);
+    }
+  }
+
+  async function copyGuide() {
+    if (!guide) return;
+    try {
+      await navigator.clipboard.writeText(guideToPlainText(guide.content, guide.candidate_name));
+      toast.success('面试提纲已复制到剪贴板');
+    } catch {
+      toast.error('复制失败，请手动选择文本复制');
     }
   }
 
@@ -250,10 +346,15 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
           </div>
           <Button onClick={() => void saveDecision()} disabled={saving}>{decision === 'accepted' ? <Check className="mr-2 h-4 w-4" /> : decision === 'overridden' ? <X className="mr-2 h-4 w-4" /> : <CircleHelp className="mr-2 h-4 w-4" />}{saving ? '保存中…' : '记录决策'}</Button>
         </div>
-        {entry.human_decision === 'accepted' && (
+        {(entry.human_decision === 'accepted' || entry.human_decision === 'overridden') && (
           <div className="mt-4 border-t border-slate-200 pt-4">
-            <Button variant="outline" onClick={() => void prepareCommunication()} disabled={preparing}><MessageSquareText className="mr-2 h-4 w-4" />{preparing ? '准备中…' : '准备沟通内容'}</Button>
-            <p className="mt-2 text-xs text-slate-500">仅已被人工接受的候选人可准备沟通；发送前仍需人工确认。</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {entry.human_decision === 'accepted' && (
+                <Button variant="outline" onClick={() => void prepareCommunication()} disabled={preparing}><MessageSquareText className="mr-2 h-4 w-4" />{preparing ? '准备中…' : '准备沟通内容'}</Button>
+              )}
+              <Button variant="outline" onClick={() => void prepareInterviewGuide()} disabled={guidePreparing}><ClipboardList className="mr-2 h-4 w-4" />{guidePreparing ? '生成中…' : '生成面试提纲'}</Button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">仅已被人工接受或覆盖的候选人可准备沟通与面试提纲；使用前仍需人工确认。</p>
             {brief && (
               <div className="mt-3 grid gap-4 rounded-lg border border-blue-200 bg-white p-4 lg:grid-cols-2">
                 <div className="lg:col-span-2">
@@ -264,6 +365,98 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
                 <div><h5 className="text-sm font-semibold text-slate-900">发送前需核验</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.facts_to_verify.map(item => <li key={item}>{item}</li>)}</ul></div>
                 <div><h5 className="text-sm font-semibold text-slate-900">建议面试问题</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.interview_questions.map(item => <li key={item}>{item}</li>)}</ul></div>
                 <div><h5 className="text-sm font-semibold text-slate-900">禁止承诺</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.prohibited_claims.map(item => <li key={item}>{item}</li>)}</ul></div>
+              </div>
+            )}
+            {guide && (
+              <div id={`guide-content-${entry.id}`} className="mt-3 rounded-lg border border-blue-200 bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50/60 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <h5 className="text-sm font-semibold text-slate-900">面试提纲</h5>
+                    <Badge variant="outline">{guide.guide?.ai_mode === 'rules_only' ? '纯规则生成' : 'AI 辅助生成'}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void copyGuide()}><Copy className="mr-1.5 h-3.5 w-3.5" />复制全文</Button>
+                    <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="mr-1.5 h-3.5 w-3.5" />打印</Button>
+                  </div>
+                </div>
+                <div className="space-y-6 p-4">
+                  <section>
+                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">考察重点</h6>
+                    {guide.content.focus_areas.length > 0 ? (
+                      <ul className="mt-2 space-y-2">
+                        {guide.content.focus_areas.map(area => (
+                          <li key={`${area.dimension}-${area.why}`} className="flex flex-wrap items-start gap-2 text-sm">
+                            <Badge variant="outline">{area.dimension}</Badge>
+                            {area.must_verify && <Badge className="bg-red-100 text-red-800">必须核实</Badge>}
+                            <span className="text-slate-600">{area.why}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <p className="mt-2 text-sm text-slate-400">暂无</p>}
+                  </section>
+                  <section>
+                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">公共必问题</h6>
+                    <p className="mt-1 text-xs text-slate-400">来自 HR 题库，未经 AI 改写</p>
+                    {guide.content.common_questions.length > 0 ? (
+                      <ol className="mt-2 space-y-2">
+                        {guide.content.common_questions.map((item, index) => (
+                          <li key={`${item.bank_id}-${index}`} className="flex items-start gap-2 text-sm">
+                            <span className="text-slate-400">{index + 1}.</span>
+                            <Badge variant="outline" className="shrink-0 bg-sky-50">HR 题库</Badge>
+                            <span className="text-slate-800">[{item.dimension}] {item.question}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : <p className="mt-2 text-sm text-slate-400">题库暂无启用题目</p>}
+                  </section>
+                  <section>
+                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">候选人专项题</h6>
+                    <ol className="mt-2 space-y-1">
+                      {guide.content.targeted_questions.map((item, index) => {
+                        const origin = GUIDE_ORIGIN_LABELS[item.origin];
+                        return (
+                          <li key={`${item.question}-${index}`}>
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" className="w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal text-slate-800">
+                                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                  <span>{index + 1}. {item.question}</span>
+                                  <Badge className={origin.className}>{origin.label}</Badge>
+                                </Button>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="pl-8">
+                                <div className="space-y-1 py-2 text-xs leading-5 text-slate-600">
+                                  <p>考察点：{item.dimension}</p>
+                                  {item.expected_signals.length > 0 && <p>期望信号：{item.expected_signals.join('；')}</p>}
+                                  {item.probe_followups.length > 0 && <p>追问路径：{item.probe_followups.join('；')}</p>}
+                                  {item.scoring_anchors.length > 0 && <p>打分锚点：{item.scoring_anchors.join('；')}</p>}
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </section>
+                  <section className="grid gap-4 sm:grid-cols-3">
+                    <div>
+                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">风险核查</h6>
+                      {guide.content.red_flags_to_check.length > 0 ? (
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{guide.content.red_flags_to_check.map(item => <li key={item}>{item}</li>)}</ul>
+                      ) : <p className="mt-2 text-sm text-slate-400">暂无</p>}
+                    </div>
+                    <div>
+                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">面试轮次建议</h6>
+                      <ul className="mt-2 space-y-1 text-sm text-slate-600">
+                        {guide.content.interview_loop.map(item => <li key={`${item.round}-${item.focus}`}>第 {item.round} 轮（{item.minutes} 分钟 · {item.interviewer_role}）：{item.focus}</li>)}
+                      </ul>
+                    </div>
+                    <div>
+                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">禁问提示</h6>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{guide.content.prohibited_topics.join('、')}等内容禁止在面试中询问。</p>
+                    </div>
+                  </section>
+                </div>
               </div>
             )}
           </div>

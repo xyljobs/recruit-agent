@@ -5135,3 +5135,364 @@ GRANT EXECUTE ON FUNCTION resolve_candidate_rights_request(VARCHAR, VARCHAR, VAR
 -- =====================================================================
 ALTER TABLE job_requirements
   ADD COLUMN IF NOT EXISTS screening_rubric JSONB DEFAULT '{}'::jsonb;
+
+-- P2 公共题库 + 个性化面试提纲
+-- =====================================================================
+
+-- 公共题只能人工录入（source 用 CHECK 锁死为 'user'）
+CREATE TABLE IF NOT EXISTS interview_question_bank (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  scope VARCHAR(20) NOT NULL,
+  job_id VARCHAR(36) REFERENCES job_requirements(id) ON DELETE CASCADE,
+  dimension VARCHAR(50) NOT NULL,
+  question TEXT NOT NULL,
+  probe_followups JSONB NOT NULL DEFAULT '[]'::JSONB,
+  expected_signals JSONB NOT NULL DEFAULT '[]'::JSONB,
+  scoring_anchors JSONB NOT NULL DEFAULT '[]'::JSONB,
+  difficulty VARCHAR(20),
+  source VARCHAR(20) NOT NULL DEFAULT 'user',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT interview_question_bank_scope_check
+    CHECK (scope IN ('organization', 'job')),
+  CONSTRAINT interview_question_bank_scope_job_check
+    CHECK ((scope = 'job' AND job_id IS NOT NULL) OR (scope = 'organization' AND job_id IS NULL)),
+  CONSTRAINT interview_question_bank_source_check
+    CHECK (source = 'user'),
+  CONSTRAINT interview_question_bank_json_check
+    CHECK (
+      jsonb_typeof(probe_followups) = 'array'
+      AND jsonb_typeof(expected_signals) = 'array'
+      AND jsonb_typeof(scoring_anchors) = 'array'
+    )
+);
+
+-- 唯一索引防重复录入（同一题目原文在一个组织 + scope + 职位下只允许一条）
+CREATE UNIQUE INDEX IF NOT EXISTS interview_question_bank_unique_question_idx
+  ON interview_question_bank(
+    organization_id,
+    scope,
+    COALESCE(job_id, '00000000-0000-0000-0000-000000000000'),
+    md5(question)
+  );
+CREATE INDEX IF NOT EXISTS interview_question_bank_organization_scope_idx
+  ON interview_question_bank(organization_id, scope, job_id, is_active);
+
+-- 提纲快照（供审计与复用）
+CREATE TABLE IF NOT EXISTS interview_guides (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  job_id VARCHAR(36) REFERENCES job_requirements(id) ON DELETE CASCADE,
+  candidate_id VARCHAR(36) REFERENCES candidates(id) ON DELETE CASCADE,
+  match_record_id VARCHAR(36) REFERENCES match_records(id) ON DELETE CASCADE,
+  shortlist_entry_id VARCHAR(36) REFERENCES shortlist_entries(id) ON DELETE CASCADE,
+  focus_areas JSONB NOT NULL DEFAULT '[]'::JSONB,
+  questions JSONB NOT NULL DEFAULT '[]'::JSONB,
+  red_flags JSONB NOT NULL DEFAULT '[]'::JSONB,
+  interview_loop JSONB NOT NULL DEFAULT '[]'::JSONB,
+  common_question_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
+  ai_mode VARCHAR(30) NOT NULL,
+  prompt_version VARCHAR(50) NOT NULL,
+  review_status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  created_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT interview_guides_ai_mode_check
+    CHECK (ai_mode IN ('rules_only', 'private_endpoint', 'approved_cloud')),
+  CONSTRAINT interview_guides_review_status_check
+    CHECK (review_status IN ('draft', 'approved', 'rejected')),
+  CONSTRAINT interview_guides_json_check
+    CHECK (
+      jsonb_typeof(focus_areas) = 'array'
+      AND jsonb_typeof(questions) = 'object'
+      AND jsonb_typeof(red_flags) = 'array'
+      AND jsonb_typeof(interview_loop) = 'array'
+      AND jsonb_typeof(common_question_ids) = 'array'
+    )
+);
+CREATE INDEX IF NOT EXISTS interview_guides_entry_created_idx
+  ON interview_guides(shortlist_entry_id, created_at);
+CREATE INDEX IF NOT EXISTS interview_guides_organization_review_idx
+  ON interview_guides(organization_id, review_status);
+
+-- RLS：基础租户读取策略（照抄 communication_briefs 写法）
+ALTER TABLE interview_question_bank ENABLE ROW LEVEL SECURITY;
+ALTER TABLE interview_guides ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS interview_question_bank_tenant_select ON interview_question_bank;
+CREATE POLICY interview_question_bank_tenant_select ON interview_question_bank
+  FOR SELECT TO authenticated
+  USING (organization_id = current_organization_id());
+
+-- 提纲读取受候选人授权有效期约束（照抄 communication_briefs 授权校验）
+DROP POLICY IF EXISTS interview_guides_tenant_select ON interview_guides;
+CREATE POLICY interview_guides_tenant_select ON interview_guides
+  FOR SELECT TO authenticated
+  USING (
+    organization_id = current_organization_id()
+    AND EXISTS (
+      SELECT 1
+      FROM shortlist_entries AS shortlist_entry
+      JOIN authorization_records AS authorization_record
+        ON authorization_record.organization_id = shortlist_entry.organization_id
+       AND authorization_record.candidate_id = shortlist_entry.candidate_id
+      WHERE shortlist_entry.id = interview_guides.shortlist_entry_id
+        AND authorization_record.is_active = true
+        AND authorization_record.evidence_status = 'verified'
+        AND authorization_record.authorized_at <= NOW()
+        AND authorization_record.processing_expires_at > NOW()
+    )
+  );
+
+-- 题库写入由应用层 RLS 客户端直写（照抄 outreach_tasks 模式），删除被禁止
+DROP POLICY IF EXISTS interview_question_bank_tenant_insert ON interview_question_bank;
+CREATE POLICY interview_question_bank_tenant_insert ON interview_question_bank
+  FOR INSERT TO authenticated
+  WITH CHECK (organization_id = current_organization_id());
+
+DROP POLICY IF EXISTS interview_question_bank_tenant_update ON interview_question_bank;
+CREATE POLICY interview_question_bank_tenant_update ON interview_question_bank
+  FOR UPDATE TO authenticated
+  USING (organization_id = current_organization_id())
+  WITH CHECK (organization_id = current_organization_id());
+
+REVOKE ALL ON interview_question_bank, interview_guides FROM authenticated;
+GRANT SELECT, INSERT, UPDATE ON interview_question_bank TO authenticated;
+GRANT SELECT ON interview_guides TO authenticated;
+REVOKE DELETE ON interview_question_bank FROM authenticated;
+REVOKE INSERT, UPDATE, DELETE ON interview_guides FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON interview_question_bank, interview_guides TO service_role;
+
+-- 提纲落库走 SECURITY DEFINER RPC（照抄 create_communication_brief：角色 + 决策 + 授权三重门禁）
+CREATE OR REPLACE FUNCTION create_interview_guide(
+  p_shortlist_entry_id VARCHAR,
+  p_prompt_version VARCHAR,
+  p_ai_mode VARCHAR,
+  p_focus_areas JSONB,
+  p_questions JSONB,
+  p_red_flags JSONB,
+  p_interview_loop JSONB,
+  p_common_question_ids JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_organization_id VARCHAR(36) := current_organization_id();
+  v_user_id VARCHAR(36) := current_app_user_id();
+  v_role VARCHAR(20) := current_app_role();
+  v_entry shortlist_entries%ROWTYPE;
+  v_latest_decision VARCHAR(30);
+  v_guide interview_guides%ROWTYPE;
+BEGIN
+  IF v_organization_id IS NULL OR v_user_id IS NULL OR v_role NOT IN ('hr', 'admin') THEN
+    RAISE EXCEPTION 'authenticated recruiter context required' USING ERRCODE = '28000';
+  END IF;
+  IF p_ai_mode NOT IN ('rules_only', 'private_endpoint', 'approved_cloud')
+    OR NULLIF(trim(p_prompt_version), '') IS NULL
+    OR jsonb_typeof(COALESCE(p_focus_areas, '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_questions, '{}'::JSONB)) <> 'object'
+    OR jsonb_typeof(COALESCE(p_red_flags, '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_interview_loop, '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_common_question_ids, '[]'::JSONB)) <> 'array' THEN
+    RAISE EXCEPTION 'invalid interview guide' USING ERRCODE = '22023';
+  END IF;
+  SELECT * INTO v_entry FROM shortlist_entries
+  WHERE id = p_shortlist_entry_id AND organization_id = v_organization_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'shortlist entry not found' USING ERRCODE = 'P0002';
+  END IF;
+  SELECT decision INTO v_latest_decision
+  FROM recommendation_decision_events
+  WHERE organization_id = v_organization_id AND shortlist_entry_id = v_entry.id
+  ORDER BY occurred_at DESC, recorded_at DESC, id DESC
+  LIMIT 1;
+  IF v_entry.human_decision NOT IN ('accepted', 'overridden')
+    OR v_latest_decision IS DISTINCT FROM v_entry.human_decision THEN
+    RAISE EXCEPTION 'interview guide requires a consistent accepted or overridden human decision' USING ERRCODE = '55000';
+  END IF;
+  PERFORM 1 FROM authorization_records
+  WHERE organization_id = v_organization_id
+    AND candidate_id = v_entry.candidate_id
+    AND is_active = true
+    AND evidence_status = 'verified'
+    AND authorized_at <= NOW()
+    AND processing_expires_at > NOW();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate authorization is no longer processable' USING ERRCODE = '55000';
+  END IF;
+  INSERT INTO interview_guides (
+    organization_id, job_id, candidate_id, match_record_id, shortlist_entry_id,
+    focus_areas, questions, red_flags, interview_loop, common_question_ids,
+    ai_mode, prompt_version, created_by
+  ) VALUES (
+    v_organization_id,
+    (SELECT job_id FROM shortlist_runs WHERE id = v_entry.shortlist_run_id),
+    v_entry.candidate_id, v_entry.match_record_id, v_entry.id,
+    COALESCE(p_focus_areas, '[]'::JSONB), COALESCE(p_questions, '{}'::JSONB),
+    COALESCE(p_red_flags, '[]'::JSONB), COALESCE(p_interview_loop, '[]'::JSONB),
+    COALESCE(p_common_question_ids, '[]'::JSONB),
+    p_ai_mode, p_prompt_version, v_user_id
+  ) RETURNING * INTO v_guide;
+  RETURN to_jsonb(v_guide);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION create_interview_guide(VARCHAR, VARCHAR, VARCHAR, JSONB, JSONB, JSONB, JSONB, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION create_interview_guide(VARCHAR, VARCHAR, VARCHAR, JSONB, JSONB, JSONB, JSONB, JSONB) TO authenticated;
+
+-- P2 新增速率限制 scope 登记（consume_api_rate_limit 两个 CASE 分支），并修复 jd:generate 漏注册
+DROP FUNCTION IF EXISTS consume_api_rate_limit(VARCHAR);
+
+CREATE OR REPLACE FUNCTION consume_api_rate_limit(
+  p_scope VARCHAR
+)
+RETURNS TABLE (
+  allowed BOOLEAN,
+  remaining INTEGER,
+  retry_after_seconds INTEGER
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_organization_id VARCHAR;
+  v_user_id VARCHAR;
+  v_now TIMESTAMP WITH TIME ZONE := clock_timestamp();
+  v_window_started_at TIMESTAMP WITH TIME ZONE;
+  v_request_count INTEGER;
+  v_limit INTEGER;
+  v_window_seconds INTEGER;
+BEGIN
+  v_organization_id := current_organization_id();
+  v_user_id := current_app_user_id();
+
+  IF v_organization_id IS NULL OR v_user_id IS NULL THEN
+    RAISE EXCEPTION 'authenticated tenant context required' USING ERRCODE = '42501';
+  END IF;
+  SELECT
+    CASE p_scope
+      WHEN 'candidates:list' THEN 120
+      WHEN 'candidates:search' THEN 120
+      WHEN 'jd:parse' THEN 10
+      WHEN 'jd:generate' THEN 10
+      WHEN 'boss:keywords' THEN 10
+      WHEN 'boss:execute' THEN 10
+      WHEN 'match:batch:submit' THEN 10
+      WHEN 'match:batch:status' THEN 120
+      WHEN 'match:single' THEN 10
+      WHEN 'dashboard:read' THEN 120
+      WHEN 'outcomes:create' THEN 30
+      WHEN 'outcomes:read' THEN 120
+      WHEN 'communication-briefs:create' THEN 20
+      WHEN 'interview:guide' THEN 10
+      WHEN 'interview:bank:read' THEN 120
+      WHEN 'interview:bank:write' THEN 30
+      WHEN 'shortlists:create' THEN 10
+      WHEN 'shortlists:read' THEN 120
+      WHEN 'shortlists:qualify' THEN 10
+      WHEN 'shortlists:decision' THEN 30
+      WHEN 'candidates:extract' THEN 10
+      WHEN 'outreach:read' THEN 120
+      WHEN 'outreach:create' THEN 30
+      WHEN 'outreach:update' THEN 60
+      WHEN 'talent-pool:read' THEN 120
+      WHEN 'job-postings:read' THEN 120
+      WHEN 'job-postings:create' THEN 30
+      WHEN 'today-todos:read' THEN 120
+    END,
+    CASE p_scope
+      WHEN 'candidates:list' THEN 60
+      WHEN 'candidates:search' THEN 60
+      WHEN 'jd:parse' THEN 300
+      WHEN 'jd:generate' THEN 300
+      WHEN 'boss:keywords' THEN 300
+      WHEN 'boss:execute' THEN 60
+      WHEN 'match:batch:submit' THEN 60
+      WHEN 'match:batch:status' THEN 60
+      WHEN 'match:single' THEN 60
+      WHEN 'dashboard:read' THEN 60
+      WHEN 'outcomes:create' THEN 60
+      WHEN 'outcomes:read' THEN 60
+      WHEN 'communication-briefs:create' THEN 60
+      WHEN 'interview:guide' THEN 300
+      WHEN 'interview:bank:read' THEN 60
+      WHEN 'interview:bank:write' THEN 60
+      WHEN 'shortlists:create' THEN 60
+      WHEN 'shortlists:read' THEN 60
+      WHEN 'shortlists:qualify' THEN 60
+      WHEN 'shortlists:decision' THEN 60
+      WHEN 'candidates:extract' THEN 300
+      WHEN 'outreach:read' THEN 60
+      WHEN 'outreach:create' THEN 60
+      WHEN 'outreach:update' THEN 60
+      WHEN 'talent-pool:read' THEN 60
+      WHEN 'job-postings:read' THEN 60
+      WHEN 'job-postings:create' THEN 60
+      WHEN 'today-todos:read' THEN 60
+    END
+  INTO v_limit, v_window_seconds;
+
+  IF v_limit IS NULL OR v_window_seconds IS NULL THEN
+    RAISE EXCEPTION 'invalid rate limit scope' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO api_rate_limits (
+    organization_id,
+    user_id,
+    scope,
+    window_started_at,
+    request_count,
+    updated_at
+  ) VALUES (
+    v_organization_id,
+    v_user_id,
+    p_scope,
+    v_now,
+    1,
+    v_now
+  )
+  ON CONFLICT (organization_id, user_id, scope)
+  DO UPDATE SET
+    window_started_at = CASE
+      WHEN api_rate_limits.window_started_at
+        <= v_now - make_interval(secs => v_window_seconds)
+      THEN v_now
+      ELSE api_rate_limits.window_started_at
+    END,
+    request_count = CASE
+      WHEN api_rate_limits.window_started_at
+        <= v_now - make_interval(secs => v_window_seconds)
+      THEN 1
+      ELSE api_rate_limits.request_count + 1
+    END,
+    updated_at = v_now
+  RETURNING
+    api_rate_limits.window_started_at,
+    api_rate_limits.request_count
+  INTO v_window_started_at, v_request_count;
+
+  RETURN QUERY SELECT
+    v_request_count <= v_limit,
+    GREATEST(v_limit - v_request_count, 0),
+    CASE
+      WHEN v_request_count <= v_limit THEN 0
+      ELSE GREATEST(
+        CEIL(EXTRACT(EPOCH FROM (
+          v_window_started_at
+          + make_interval(secs => v_window_seconds)
+          - v_now
+        )))::INTEGER,
+        1
+      )
+    END;
+END;
+$$;

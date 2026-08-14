@@ -301,6 +301,7 @@ export async function POST(request: NextRequest) {
       {
         ...scoringInput.job,
         raw_jd: typeof jobRecord.raw_jd === 'string' ? jobRecord.raw_jd : null,
+        screening_rubric: jobRecord.screening_rubric,
       },
       {
         ...scoringInput.candidate,
@@ -380,7 +381,12 @@ export async function POST(request: NextRequest) {
     }
 
     const trustedBaseScore = validatedBaseScore.data;
-    let matchDetails: MatchDetails = trustedBaseScore.match_details;
+    let matchDetails: MatchDetails = {
+      ...trustedBaseScore.match_details,
+      // 旧记录/LLM 输出可能缺 constraint_analysis（schema 可选），缺省补空而非判无效
+      constraint_analysis: trustedBaseScore.match_details.constraint_analysis
+        ?? { hard_constraints: [], boundary_flags: [] },
+    };
     let supplementError: SupplementFailureCode | null = null;
     let supplementAttempted = false;
 
@@ -414,10 +420,7 @@ export async function POST(request: NextRequest) {
 
         const supplement = parseMatchLlmSupplement(fullResponse);
         if (supplement) {
-          matchDetails = attachLlmSupplement(
-            trustedBaseScore.match_details,
-            supplement,
-          );
+          matchDetails = attachLlmSupplement(matchDetails, supplement);
         } else {
           supplementError = 'SUPPLEMENT_OUTPUT_INVALID';
         }

@@ -1,10 +1,12 @@
 import { SCORE_WEIGHTS } from '@/storage/database/shared/schema';
 import { matchLlmSupplementSchema } from '@/lib/ai/match-scoring';
 import { calculateManufacturingMatchScore } from './manufacturing-scorer';
+import { parseScreeningRubric, scoreExperienceBand } from './screening-rubric';
+import type { BoundaryFlag, HardConstraintViolation } from './verdict';
 
 export { SCORE_WEIGHTS };
 
-export const BASE_SCORING_MODEL = 'explainable-base-v2';
+export const BASE_SCORING_MODEL = 'explainable-base-v3';
 export type MatchScoreWeights = Record<keyof typeof SCORE_WEIGHTS, number>;
 
 export interface MatchJobInput {
@@ -19,6 +21,8 @@ export interface MatchJobInput {
   salary_range?: string | null;
   location?: string | null;
   urgency?: string | null;
+  /** 职位筛选口径（年限区间等）；内部经 zod 解析，非法值按空 rubric 处理 */
+  screening_rubric?: unknown;
 }
 
 export interface MatchCandidateInput {
@@ -68,6 +72,10 @@ export interface MatchDetails {
     job_city: string;
     match: boolean;
   };
+  constraint_analysis: {
+    hard_constraints: HardConstraintViolation[];
+    boundary_flags: BoundaryFlag[];
+  };
   llm_supplement?: MatchLlmSupplement;
   manufacturing_analysis?: import('@/lib/matching/manufacturing-scorer').ManufacturingAnalysis;
 }
@@ -82,6 +90,8 @@ export interface BaseMatchScore {
   availability_score: number;
   stability_score: number;
   match_details: MatchDetails;
+  hard_constraints: HardConstraintViolation[];
+  boundary_flags: BoundaryFlag[];
 }
 
 /**
@@ -122,7 +132,16 @@ export function calculateBaseMatchScore(
   const requiredExperience = parseExperienceYears(job.experience_required ?? '');
   const candidateExperience = toFiniteNumber(candidate.experience_years);
   let experienceScore = 50;
-  if (requiredExperience > 0) {
+  const rubric = parseScreeningRubric(job.screening_rubric);
+  const bandScore = scoreExperienceBand(rubric.experience_band, candidate.experience_years);
+  const experienceHardConstraints: HardConstraintViolation[] = [];
+  const experienceBoundaryFlags: BoundaryFlag[] = [];
+  if (bandScore) {
+    // P1 年限区间口径：band 存在时按区间五段评分，分数不承担否决职责
+    experienceScore = bandScore.score;
+    experienceHardConstraints.push(...bandScore.hard_constraints);
+    experienceBoundaryFlags.push(...bandScore.boundary_flags);
+  } else if (requiredExperience > 0) {
     if (candidateExperience >= requiredExperience) {
       experienceScore = Math.min(
         100,
@@ -299,6 +318,10 @@ export function calculateBaseMatchScore(
       job_city: jobCity || '未知',
       match: currentCityMatches,
     },
+    constraint_analysis: {
+      hard_constraints: experienceHardConstraints,
+      boundary_flags: experienceBoundaryFlags,
+    },
   };
 
   return {
@@ -311,6 +334,8 @@ export function calculateBaseMatchScore(
     availability_score: availabilityScore,
     stability_score: stabilityScore,
     match_details: matchDetails,
+    hard_constraints: experienceHardConstraints,
+    boundary_flags: experienceBoundaryFlags,
   };
 }
 

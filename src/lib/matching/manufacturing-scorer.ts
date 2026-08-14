@@ -383,8 +383,14 @@ export function calculateManufacturingMatchScore(
         job_city: job.location?.trim() || '未知',
         match: cityMatches(job.location, candidate.current_city, candidate.preferred_locations),
       },
+      constraint_analysis: {
+        hard_constraints: [],
+        boundary_flags: [],
+      },
       manufacturing_analysis: analysis,
     },
+    hard_constraints: [],
+    boundary_flags: [],
   };
 }
 

@@ -35,6 +35,10 @@ const details: BaseMatchScore['match_details'] = {
     job_city: '杭州',
     match: true,
   },
+  constraint_analysis: {
+    hard_constraints: [],
+    boundary_flags: [],
+  },
 };
 
 function score(candidateId: string, overall: number) {

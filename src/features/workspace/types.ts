@@ -7,6 +7,16 @@ export interface WorkspaceUser {
   must_change_password: boolean;
 }
 
+export interface ScreeningRubric {
+  experience_band?: {
+    min: number | null;
+    preferred_max: number | null;
+    hard_max: number | null;
+    source: 'explicit' | 'inferred';
+    hard_max_enabled: boolean;
+  } | null;
+}
+
 export interface Job {
   id: string;
   title: string;
@@ -23,6 +33,8 @@ export interface Job {
   implicit_requirements: string[] | null;
   completeness: number | null;
   missing_fields: string[] | null;
+  raw_jd: string | null;
+  screening_rubric?: ScreeningRubric | null;
   status: string;
   created_at: string;
 }

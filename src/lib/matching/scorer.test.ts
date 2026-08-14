@@ -161,3 +161,59 @@ test('normalizes fractional inputs to integer scores', () => {
     assert.equal(value >= 0 && value <= 100, true);
   }
 });
+
+// P1 回归保护（计划 §4.6-5）：无 screening_rubric 时沿用旧经验评分逻辑
+function bandedJob(experienceBand: unknown) {
+  return { ...job, screening_rubric: { experience_band: experienceBand } };
+}
+
+test('legacy experience scoring unchanged without screening rubric', () => {
+  const legacy = calculateBaseMatchScore(job, candidate);
+  assert.equal(legacy.experience_score, 75);
+  assert.deepEqual(legacy.hard_constraints, []);
+  assert.deepEqual(legacy.boundary_flags, []);
+  assert.deepEqual(legacy.match_details.constraint_analysis, {
+    hard_constraints: [],
+    boundary_flags: [],
+  });
+
+  // 非法 rubric 同样回退旧逻辑（计划 4.2：解析失败返回空而非 throw）
+  const invalid = calculateBaseMatchScore(
+    { ...job, screening_rubric: 'garbage' },
+    candidate,
+  );
+  assert.equal(invalid.experience_score, legacy.experience_score);
+});
+
+test('screening rubric band overrides legacy experience scoring', () => {
+  const banded = calculateBaseMatchScore(
+    bandedJob({ min: 3, preferred_max: 5, hard_max: null, source: 'explicit', hard_max_enabled: false }),
+    candidate,
+  );
+  assert.equal(banded.experience_score, 100);
+  assert.equal(banded.overall_score, 94);
+  assert.deepEqual(banded.hard_constraints, []);
+});
+
+test('enabled hard max emits constraint instead of veto score', () => {
+  const overMax = calculateBaseMatchScore(
+    bandedJob({ min: 3, preferred_max: 5, hard_max: 6, source: 'explicit', hard_max_enabled: true }),
+    { ...candidate, experience_years: 7 },
+  );
+  // 分数不承担否决职责：60 而非 0（计划 4.2 铁律）
+  assert.equal(overMax.experience_score, 60);
+  assert.equal(overMax.hard_constraints.length, 1);
+  assert.equal(overMax.hard_constraints[0].code, 'experience_over_hard_max');
+  assert.deepEqual(
+    overMax.match_details.constraint_analysis.hard_constraints,
+    overMax.hard_constraints,
+  );
+
+  const disabled = calculateBaseMatchScore(
+    bandedJob({ min: 3, preferred_max: 5, hard_max: 6, source: 'inferred', hard_max_enabled: false }),
+    { ...candidate, experience_years: 7 },
+  );
+  assert.equal(disabled.experience_score, 80);
+  assert.equal(disabled.hard_constraints.length, 0);
+  assert.deepEqual(disabled.boundary_flags, [{ code: 'experience_boundary', label: '边界' }]);
+});

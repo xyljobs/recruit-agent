@@ -5,6 +5,7 @@ import { getTenantRequestContext } from '@/lib/auth-server';
 import { JD_JSON_BODY_LIMIT, jdParseBodySchema, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
 import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
+import { parseExperienceBand } from '@/lib/matching/screening-rubric';
 
 const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职位描述(JD)并提取关键信息。
 
@@ -34,6 +35,14 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
          "熟悉微服务" → 需要Spring Cloud + Docker + 服务治理经验
 13. 完整度 (completeness) - 0-100分，JD信息的完整程度
 14. 缺失字段 (missing_fields) - 数组格式，JD中缺失的重要字段名称
+15. 经验年限区间 (experience_band) - 对象，从JD的年限要求中提取：
+    { "min": 最低年限数值或null, "preferred_max": 优先上限数值或null, "hard_max": 硬上限数值或null, "source": "explicit"或"inferred" }
+    提取规则：
+    - "3-5年" → min=3, preferred_max=5, hard_max=null
+    - "3年以上" → min=3, preferred_max=null, hard_max=null
+    - "5年以内" / "不超过6年" / "最多6年" / "上限6年" → hard_max=该数值
+    - source 判定：JD原文明确写出"以内/不超过/上限/最多"等上限语义 → "explicit"；否则（如"3-5年"）→ "inferred"
+    - JD未提及年限要求 → null
 
 请以JSON格式返回结果，格式如下：
 {
@@ -52,7 +61,8 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
   "urgency": "normal",
   "implicit_requirements": ["隐含需求1", "隐含需求2"],
   "completeness": 85,
-  "missing_fields": ["缺失字段1"]
+  "missing_fields": ["缺失字段1"],
+  "experience_band": { "min": 3, "preferred_max": 5, "hard_max": null, "source": "inferred" }
 }
 
 注意：
@@ -119,6 +129,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 保存到数据库
+    // 年限区间口径（计划 §4.2/§4.4）：hard_max_enabled 由服务端按 JD 原文重算，
+    // 不信任 LLM 输出的 source；仅当 JD 年限表述含上限语义（以内/不超过/上限/最多）才启用硬门槛。
+    const screeningRubric = buildScreeningRubric(
+      parsedResult.experience_band,
+      parsedResult.experience_required,
+      jdContent,
+    );
     const { data, error } = await supabase
       .from('job_requirements')
       .insert({
@@ -140,6 +157,7 @@ export async function POST(request: NextRequest) {
         implicit_requirements: parsedResult.implicit_requirements || [],
         completeness: parsedResult.completeness || null,
         missing_fields: parsedResult.missing_fields || [],
+        screening_rubric: screeningRubric,
         raw_jd: jdContent,
         status: 'active',
         activated_at: new Date().toISOString(),
@@ -160,6 +178,7 @@ export async function POST(request: NextRequest) {
       data: {
         id: data.id,
         ...parsedResult,
+        screening_rubric: screeningRubric,
         created_at: data.created_at,
       }
     });
@@ -174,4 +193,49 @@ export async function POST(request: NextRequest) {
     }
     return apiErrorResponse(error, '服务器内部错误');
   }
+}
+
+/** 服务端重算年限区间：以经验要求文本解析为准，失败时回退 LLM 结构；source/enabled 按 JD 原文判定。 */
+function buildScreeningRubric(
+  llmBand: unknown,
+  experienceRequired: unknown,
+  jdContent: string,
+): Record<string, unknown> {
+  const parsedBand = parseExperienceBand(
+    typeof experienceRequired === 'string' ? experienceRequired : '',
+  );
+  const bandShape = parsedBand ?? extractLlmBand(llmBand);
+  if (!bandShape) return {};
+
+  const upperBoundSemantics = /以内|不超过|上限|最多/;
+  // 只检查 JD 中年限表述的上下文片段，避免"试用期不超过3个月"等无关表述误判
+  const yearSegments = jdContent.match(
+    /[^\n。；;]{0,15}(?:\d+(?:\.\d+)?\s*[-~～到至]?\s*\d*(?:\.\d+)?\s*年)[^\n。；;]{0,10}/g,
+  ) ?? [];
+  const explicit = upperBoundSemantics.test(String(experienceRequired ?? ''))
+    || yearSegments.some((segment) => upperBoundSemantics.test(segment));
+  return {
+    experience_band: {
+      ...bandShape,
+      source: explicit ? 'explicit' : 'inferred',
+      hard_max_enabled: explicit,
+    },
+  };
+}
+
+function extractLlmBand(value: unknown): {
+  min: number | null;
+  preferred_max: number | null;
+  hard_max: number | null;
+} | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const toNumber = (item: unknown): number | null => (
+    typeof item === 'number' && Number.isFinite(item) ? item : null
+  );
+  const min = toNumber(record.min);
+  const preferredMax = toNumber(record.preferred_max);
+  const hardMax = toNumber(record.hard_max);
+  if (min === null && preferredMax === null && hardMax === null) return null;
+  return { min, preferred_max: preferredMax, hard_max: hardMax };
 }

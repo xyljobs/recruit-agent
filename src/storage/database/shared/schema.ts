@@ -151,6 +151,7 @@ export const jobRequirements = pgTable(
     implicit_requirements: jsonb("implicit_requirements").$type<string[]>(), // 隐含需求（AI识别）
     completeness: integer("completeness"), // JD完整度评分 0-100
     missing_fields: jsonb("missing_fields").$type<string[]>(), // 缺失字段
+    screening_rubric: jsonb("screening_rubric").default(sql`'{}'::jsonb`), // 筛选口径（年限区间/能力优先级/加分封顶）
     raw_jd: text("raw_jd").notNull(),
     status: varchar("status", { length: 20 }).notNull().default("active"),
     activated_at: timestamp("activated_at", { withTimezone: true }),

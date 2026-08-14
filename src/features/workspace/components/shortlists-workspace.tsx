@@ -27,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
+import { formatExperienceBand } from '@/lib/matching/screening-rubric';
 import { collectHardConstraints, deriveMatchVerdict } from '@/lib/matching/verdict';
 import { cn } from '@/lib/utils';
 import { DECISION_LABELS } from '../constants';
@@ -370,6 +371,21 @@ export function ShortlistsWorkspace() {
     return run.job?.title || jobs.find((job) => job.id === run.job_id)?.title || run.job_id;
   }
 
+  // 当前批次对应职位的年限口径（计划 §4.5）：零接口新增，直接读职位 screening_rubric。
+  const bandSummary = useMemo(() => {
+    if (!selectedRun) return null;
+    const job = jobs.find((item) => item.id === selectedRun.job_id);
+    const band = job?.screening_rubric?.experience_band;
+    if (!band) return null;
+    const label = formatExperienceBand(band);
+    if (!label) return null;
+    const sourceText = band.source === 'explicit' ? 'JD 明确' : 'AI 推断';
+    if (band.hard_max !== null && band.hard_max_enabled) {
+      return `${label}（${sourceText}，超过 ${band.hard_max} 年为硬门槛）`;
+    }
+    return `${label}（${sourceText}，未设为硬门槛）`;
+  }, [jobs, selectedRun]);
+
   async function qualifyRun() {
     if (!selectedRun) return;
     setQualifying(true);
@@ -415,7 +431,7 @@ export function ShortlistsWorkspace() {
               </TabsList>
               <TabsContent value="table" className="space-y-4">
                 <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-xs leading-5 text-slate-700">
-                  本批筛选口径：结论等级由规则层依据综合分、证据置信度与必需技能覆盖率派生，仅用于安排评估优先级；“不建议推进”必须附具体原因，且可由 HR 人工覆盖。排序分不用于自动拒绝候选人。
+                  本批筛选口径：{bandSummary && <span>年限 {bandSummary}；</span>}结论等级由规则层依据综合分、证据置信度与必需技能覆盖率派生，仅用于安排评估优先级；“不建议推进”必须附具体原因，且可由 HR 人工覆盖。排序分不用于自动拒绝候选人。
                 </div>
                 <MatchRankingTable
                   entries={selectedRun.entries}

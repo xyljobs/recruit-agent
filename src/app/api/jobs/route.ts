@@ -4,6 +4,7 @@ import { getTenantRequestContext } from '@/lib/auth-server';
 import { SMALL_JSON_BODY_LIMIT, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
 import { rpcErrorToRequestError } from '@/lib/recruiting/api-contracts';
+import { screeningRubricSchema } from '@/lib/matching/screening-rubric';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({
@@ -16,6 +17,7 @@ const bodySchema = z.discriminatedUnion('action', [
     education_required: z.string().trim().max(100).optional(),
     skills_required: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
     responsibilities: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+    screening_rubric: screeningRubricSchema.optional(),
   }).strict(),
   z.object({ action: z.enum(['activate', 'close']), job_id: z.string().uuid() }).strict(),
 ]);
@@ -104,6 +106,7 @@ export async function POST(request: NextRequest) {
         education_required: body.education_required ?? null,
         skills_required: body.skills_required,
         responsibilities: body.responsibilities,
+        screening_rubric: body.screening_rubric ?? {},
         completeness: Math.round((completedFields / 6) * 100),
         missing_fields: missingFields,
         status: 'draft',

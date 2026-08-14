@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
+import { formatExperienceBand } from '@/lib/matching/screening-rubric';
 import { useWorkspaceData } from '../hooks/use-workspace-data';
 import type { Job } from '../types';
 
@@ -70,6 +71,8 @@ export function JobWorkspace() {
   } = useWorkspaceData();
   const [jdContent, setJdContent] = useState('');
   const [parsedJob, setParsedJob] = useState<Job | null>(null);
+  const parsedBand = parsedJob?.screening_rubric?.experience_band ?? null;
+  const parsedBandLabel = formatExperienceBand(parsedBand);
   const [jdLoading, setJdLoading] = useState(false);
   const [jobSearch, setJobSearch] = useState('');
   const [manualTitle, setManualTitle] = useState('');
@@ -350,6 +353,23 @@ export function JobWorkspace() {
                       <p className="font-medium">
                         {parsedJob.experience_required}
                       </p>
+                      {parsedBand && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className="bg-white">
+                            {parsedBandLabel}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={
+                              parsedBand.source === 'explicit'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }
+                          >
+                            {parsedBand.source === 'explicit' ? 'JD 明确' : 'AI 推断'}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                   )}
                   {parsedJob.education_required && (

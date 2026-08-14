@@ -5129,3 +5129,9 @@ REVOKE ALL ON FUNCTION record_automated_decision_objection(VARCHAR, VARCHAR) FRO
 REVOKE ALL ON FUNCTION resolve_candidate_rights_request(VARCHAR, VARCHAR, VARCHAR) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION record_automated_decision_objection(VARCHAR, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION resolve_candidate_rights_request(VARCHAR, VARCHAR, VARCHAR) TO authenticated;
+
+-- =====================================================================
+-- P1 年限区间口径：职位筛选 rubric（经验年限区间 + 能力优先级 + 加分封顶）
+-- =====================================================================
+ALTER TABLE job_requirements
+  ADD COLUMN IF NOT EXISTS screening_rubric JSONB DEFAULT '{}'::jsonb;

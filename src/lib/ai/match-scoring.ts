@@ -1,10 +1,19 @@
 import { z } from 'zod';
+import { BOUNDARY_CODES, HARD_CONSTRAINT_CODES } from '@/lib/matching/verdict';
 
 export const MATCH_SCORING_INPUT_VERSION = 'match-scoring-input-v3';
 
 const supplementTextSchema = z.string().trim().min(1).max(1000);
 const scoreSchema = z.number().int().min(0).max(100);
 const detailTextSchema = z.string().trim().min(1).max(10_000);
+const hardConstraintViolationSchema = z.object({
+  code: z.enum(HARD_CONSTRAINT_CODES),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+const boundaryFlagSchema = z.object({
+  code: z.enum(BOUNDARY_CODES),
+  label: z.string().trim().min(1).max(100),
+}).strict();
 
 export const baseMatchScoreSchema = z.object({
   overall_score: scoreSchema,
@@ -15,6 +24,8 @@ export const baseMatchScoreSchema = z.object({
   location_score: scoreSchema,
   availability_score: scoreSchema,
   stability_score: scoreSchema,
+  hard_constraints: z.array(hardConstraintViolationSchema).max(10).optional(),
+  boundary_flags: z.array(boundaryFlagSchema).max(10).optional(),
     match_details: z.object({
     strengths: z.array(detailTextSchema).max(20),
     gaps: z.array(detailTextSchema).max(20),
@@ -34,6 +45,10 @@ export const baseMatchScoreSchema = z.object({
       job_city: z.string().trim().min(1).max(100),
       match: z.boolean(),
       }).strict(),
+      constraint_analysis: z.object({
+        hard_constraints: z.array(hardConstraintViolationSchema).max(10),
+        boundary_flags: z.array(boundaryFlagSchema).max(10),
+      }).strict().optional(),
       manufacturing_analysis: z.object({
         role_id: z.enum(['MFG-PLC-V1', 'MFG-ROB-V1', 'MFG-MNT-V1']),
         standard_version: z.literal('manufacturing-frozen-v1'),

@@ -6,14 +6,23 @@
 
 export type MatchGrade = 'A' | 'A-' | 'B+' | 'B' | 'insufficient' | 'not_recommended';
 
-export type HardConstraintCode =
-  | 'authorization_inactive'
-  | 'authorization_expired'
-  | 'automated_decision_objected'
-  | 'required_skills_missing'
-  | 'experience_over_hard_max';        // P1 才会被触发
+export const HARD_CONSTRAINT_CODES = [
+  'authorization_inactive',
+  'authorization_expired',
+  'automated_decision_objected',
+  'required_skills_missing',
+  'experience_over_hard_max', // P1 才会被触发
+] as const;
 
-export type BoundaryCode = 'experience_boundary' | 'frequent_job_change' | 'cross_city';
+export type HardConstraintCode = (typeof HARD_CONSTRAINT_CODES)[number];
+
+export const BOUNDARY_CODES = [
+  'experience_boundary',
+  'frequent_job_change',
+  'cross_city',
+] as const;
+
+export type BoundaryCode = (typeof BOUNDARY_CODES)[number];
 
 export interface HardConstraintViolation {
   code: HardConstraintCode;

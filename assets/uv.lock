@@ -1464,6 +1464,7 @@ name = "zhipin-agent-workers"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cloakbrowser" },
     { name = "cryptography" },
     { name = "pdfplumber" },
     { name = "pymupdf" },
@@ -1480,6 +1481,7 @@ boss-search = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cloakbrowser", specifier = ">=0.3.31" },
     { name = "cloakbrowser", marker = "extra == 'boss-search'", specifier = ">=0.3.31" },
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "pdfplumber", specifier = ">=0.11.0" },

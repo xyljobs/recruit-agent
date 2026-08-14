@@ -1540,7 +1540,8 @@ async def cmd_doctor():
             ok = False
 
     cookies = USER_DATA_DIR / "Default" / "Cookies"
-    if cookies.exists():
+    network_cookies = USER_DATA_DIR / "Default" / "Network" / "Cookies"
+    if cookies.exists() or network_cookies.exists():
         print(f"  ✅ 登录态: {USER_DATA_DIR}")
     else:
         print(f"  ⚠️ 没找到登录态 → 先跑 boss.py login")

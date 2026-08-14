@@ -4231,6 +4231,9 @@ DECLARE
   v_reviewed INTEGER;
   v_outreach INTEGER;
   v_interviews INTEGER;
+  v_question_hits INTEGER;
+  v_question_total INTEGER;
+  v_question_by_origin JSONB;
   v_sum NUMERIC;
   v_proposal calibration_proposals%ROWTYPE;
 BEGIN
@@ -4255,6 +4258,28 @@ BEGIN
     OR NULLIF(trim(p_rationale), '') IS NULL THEN
     RAISE EXCEPTION 'weights and rationale are required' USING ERRCODE = '22023';
   END IF;
+  -- 提纲专项题命中率：来自面试反馈中逐题记录（metadata.question_results），作为校准输入之一
+  SELECT
+    COUNT(*) FILTER (WHERE (item->>'hit')::BOOLEAN = true),
+    COUNT(*)
+  INTO v_question_hits, v_question_total
+  FROM recruiting_outcome_events AS event
+  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(event.metadata->'question_results', '[]'::JSONB)) AS item
+  WHERE event.organization_id = v_organization_id
+    AND event.event_type = 'interview_feedback';
+  SELECT jsonb_object_agg(origin, stats) INTO v_question_by_origin
+  FROM (
+    SELECT COALESCE(item->>'origin', 'unknown') AS origin,
+           jsonb_build_object(
+             'total', COUNT(*),
+             'hits', COUNT(*) FILTER (WHERE (item->>'hit')::BOOLEAN = true)
+           ) AS stats
+    FROM recruiting_outcome_events AS event
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(event.metadata->'question_results', '[]'::JSONB)) AS item
+    WHERE event.organization_id = v_organization_id
+      AND event.event_type = 'interview_feedback'
+    GROUP BY 1
+  ) AS grouped;
   SELECT SUM(value::NUMERIC) INTO v_sum FROM jsonb_each_text(p_proposed_weights);
   IF abs(v_sum - 1.0) > 0.000001 THEN
     RAISE EXCEPTION 'scoring weights must sum to 1.0' USING ERRCODE = '22023';
@@ -4264,12 +4289,25 @@ BEGIN
     metrics_snapshot, proposed_weights, rationale, source_weights_version_id, created_by
   ) VALUES (
     v_organization_id, v_reviewed, v_outreach, v_interviews,
-    jsonb_build_object('reviewed_entries', v_reviewed, 'outreach_events', v_outreach, 'completed_interviews', v_interviews),
+    jsonb_build_object(
+      'reviewed_entries', v_reviewed,
+      'outreach_events', v_outreach,
+      'completed_interviews', v_interviews,
+      'guide_question_hits', jsonb_build_object(
+        'total', v_question_total,
+        'hits', v_question_hits,
+        'hit_rate', CASE WHEN v_question_total > 0 THEN round(v_question_hits::NUMERIC / v_question_total, 4) ELSE 0 END,
+        'by_origin', COALESCE(v_question_by_origin, '{}'::JSONB)
+      )
+    ),
     p_proposed_weights, p_rationale,
     (SELECT id FROM scoring_weight_versions WHERE organization_id = v_organization_id AND status = 'active'),
     v_user_id
   ) RETURNING * INTO v_proposal;
-  RETURN jsonb_build_object('eligible', true, 'proposal_id', v_proposal.id, 'status', v_proposal.status);
+  RETURN jsonb_build_object(
+    'eligible', true, 'proposal_id', v_proposal.id, 'status', v_proposal.status,
+    'metrics', v_proposal.metrics_snapshot
+  );
 END;
 $$;
 
@@ -5671,6 +5709,7 @@ BEGIN
       WHEN 'outcomes:read' THEN 120
       WHEN 'communication-briefs:create' THEN 20
       WHEN 'interview:guide' THEN 10
+      WHEN 'interview:guide:read' THEN 120
       WHEN 'interview:bank:read' THEN 120
       WHEN 'interview:bank:write' THEN 30
       WHEN 'shortlists:create' THEN 10
@@ -5701,6 +5740,7 @@ BEGIN
       WHEN 'outcomes:read' THEN 60
       WHEN 'communication-briefs:create' THEN 60
       WHEN 'interview:guide' THEN 300
+      WHEN 'interview:guide:read' THEN 60
       WHEN 'interview:bank:read' THEN 60
       WHEN 'interview:bank:write' THEN 60
       WHEN 'shortlists:create' THEN 60

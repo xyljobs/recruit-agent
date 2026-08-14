@@ -43,10 +43,21 @@ export const interviewScheduledMetadataSchema = z.strictObject({
     .max(20, '面试官最多 20 位'),
 });
 
+export const guideQuestionResultSchema = z.strictObject({
+  question: z.string().trim().min(1).max(500),
+  origin: z.enum(['evidence_gap', 'depth_check', 'boundary_risk', 'resume_probe']),
+  hit: z.boolean(),
+});
+
 export const interviewFeedbackMetadataSchema = z.strictObject({
   summary: boundedNoteSchema,
   verdict: z.enum(['pass', 'fail', 'hold']),
-});
+  interview_guide_id: uuidSchema.optional(),
+  question_results: z.array(guideQuestionResultSchema).min(1).max(10).optional(),
+}).refine(
+  (value) => value.question_results === undefined || value.interview_guide_id !== undefined,
+  '记录提纲题目命中情况时必须关联面试提纲',
+);
 
 export const offerDetailsMetadataSchema = z.strictObject({
   compensation_note: z.string().trim().max(2000).optional(),

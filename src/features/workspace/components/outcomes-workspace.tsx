@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
@@ -97,6 +98,13 @@ interface OutcomeEventItem {
   recorded_at: string;
 }
 
+interface AvailableGuideItem {
+  id: string;
+  created_at: string;
+  ai_mode: string;
+  targeted_questions: Array<{ question: string | null; origin: string | null; dimension: string | null }>;
+}
+
 function formatInterviewSchedule(event: OutcomeEventItem): string | null {
   const scheduledAt = event.metadata?.scheduled_at;
   if (typeof scheduledAt !== 'string' || !scheduledAt) return null;
@@ -134,6 +142,10 @@ export function OutcomesWorkspace() {
   const [interviewers, setInterviewers] = useState('');
   const [feedbackSummary, setFeedbackSummary] = useState('');
   const [feedbackVerdict, setFeedbackVerdict] = useState('pass');
+  // P3-1：面试反馈可关联已生成提纲，并逐题记录命中情况（作为校准输入）
+  const [availableGuides, setAvailableGuides] = useState<AvailableGuideItem[]>([]);
+  const [feedbackGuideId, setFeedbackGuideId] = useState('');
+  const [questionRatings, setQuestionRatings] = useState<Record<string, 'hit' | 'miss' | 'skipped'>>({});
   const [compensationNote, setCompensationNote] = useState('');
   const [approvalNote, setApprovalNote] = useState('');
   const [matchEvents, setMatchEvents] = useState<OutcomeEventItem[]>([]);
@@ -206,13 +218,58 @@ export function OutcomesWorkspace() {
     }
   }
 
+  async function loadAvailableGuides(matchRecordId: string) {
+    try {
+      const response = await authFetch(`/api/interview/guides?matchRecordId=${matchRecordId}`);
+      const result: { success?: boolean; data?: AvailableGuideItem[]; error?: string } = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || '获取面试提纲失败');
+      setAvailableGuides(result.data ?? []);
+    } catch {
+      setAvailableGuides([]);
+    }
+  }
+
   useEffect(() => {
     if (selectedMatch) {
       void loadMatchEvents(selectedMatch.id);
+      void loadAvailableGuides(selectedMatch.id);
+      setFeedbackGuideId('');
+      setQuestionRatings({});
     } else {
       setMatchEvents([]);
+      setAvailableGuides([]);
     }
   }, [selectedMatch?.id]);
+
+  const selectedGuide = useMemo(
+    () => availableGuides.find((guide) => guide.id === feedbackGuideId) ?? null,
+    [availableGuides, feedbackGuideId],
+  );
+
+  function handleGuideSelect(guideId: string) {
+    // 'none' 表示不关联：统一回落为空串，避免混入提交载荷
+    setFeedbackGuideId(guideId === 'none' ? '' : guideId);
+    setQuestionRatings({});
+  }
+
+  function guideOptionLabel(guide: AvailableGuideItem): string {
+    const date = new Date(guide.created_at);
+    const label = Number.isNaN(date.getTime())
+      ? guide.created_at
+      : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `${guide.ai_mode === 'rules_only' ? '纯规则' : 'AI 辅助'}提纲 · ${label}`;
+  }
+
+  const questionResults = useMemo(() => {
+    if (!selectedGuide) return [];
+    return selectedGuide.targeted_questions
+      .filter((item) => item.question && item.origin && questionRatings[item.question] && questionRatings[item.question] !== 'skipped')
+      .map((item) => ({
+        question: item.question as string,
+        origin: item.origin as string,
+        hit: questionRatings[item.question as string] === 'hit',
+      }));
+  }, [selectedGuide, questionRatings]);
 
   const latestInterview = useMemo(() => {
     const scheduled = matchEvents.filter((event) => event.event_type === 'interview_scheduled');
@@ -251,7 +308,12 @@ export function OutcomesWorkspace() {
     const metadata: Record<string, unknown> | undefined = eventType === 'interview_scheduled'
       ? { scheduled_at: new Date(interviewScheduledAt).toISOString(), method: interviewMethod, interviewers: interviewerList }
       : eventType === 'interview_feedback'
-        ? { summary: feedbackSummary.trim(), verdict: feedbackVerdict }
+        ? {
+            summary: feedbackSummary.trim(),
+            verdict: feedbackVerdict,
+            ...(feedbackGuideId ? { interview_guide_id: feedbackGuideId } : {}),
+            ...(questionResults.length > 0 ? { question_results: questionResults } : {}),
+          }
         : eventType === 'offer_details'
           ? {
               ...(compensationNote.trim() ? { compensation_note: compensationNote.trim() } : {}),
@@ -289,6 +351,8 @@ export function OutcomesWorkspace() {
       setFeedbackSummary('');
       setCompensationNote('');
       setApprovalNote('');
+      setFeedbackGuideId('');
+      setQuestionRatings({});
       await Promise.all([reloadMatchRecords(), reloadDashboard(), loadMatchEvents(matchId)]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '真实结果记录失败');
@@ -392,6 +456,44 @@ export function OutcomesWorkspace() {
             {eventType === 'interview_feedback' && (
               <div className="space-y-3 rounded-lg border border-slate-200 p-3">
                 <div className="space-y-2"><Label htmlFor="feedback-verdict">面试结论</Label><Select value={feedbackVerdict} onValueChange={setFeedbackVerdict}><SelectTrigger id="feedback-verdict" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pass">通过</SelectItem><SelectItem value="fail">不通过</SelectItem><SelectItem value="hold">待定</SelectItem></SelectContent></Select></div>
+                <div className="space-y-2">
+                  <Label htmlFor="feedback-guide">关联面试提纲（可选）</Label>
+                  <Select value={feedbackGuideId} onValueChange={handleGuideSelect}>
+                    <SelectTrigger id="feedback-guide" className="w-full"><SelectValue placeholder={availableGuides.length === 0 ? '该候选人暂无已生成提纲' : '不关联'} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">不关联</SelectItem>
+                      {availableGuides.map((guide) => <SelectItem key={guide.id} value={guide.id}>{guideOptionLabel(guide)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-slate-500">关联后可按提纲逐题记录命中情况，供评分校准参考。</p>
+                </div>
+                {selectedGuide && (
+                  <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                    <Label>专项题命中情况（选填）</Label>
+                    {selectedGuide.targeted_questions.filter((item) => item.question && item.origin).map((item) => {
+                      const question = item.question as string;
+                      const rating = questionRatings[question] ?? 'skipped';
+                      return (
+                        <div key={question} className="space-y-1.5">
+                          <p className="text-sm leading-6 text-slate-700">{question}</p>
+                          <RadioGroup
+                            value={rating}
+                            onValueChange={(value) => setQuestionRatings((previous) => ({ ...previous, [question]: value as 'hit' | 'miss' | 'skipped' }))}
+                            className="flex gap-4"
+                            aria-label={`题目「${question}」命中情况`}
+                          >
+                            {([['hit', '命中'], ['miss', '未命中'], ['skipped', '未考察']] as const).map(([value, label]) => (
+                              <label key={value} className="flex items-center gap-1.5 text-sm text-slate-600">
+                                <RadioGroupItem value={value} />
+                                {label}
+                              </label>
+                            ))}
+                          </RadioGroup>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="space-y-2"><Label htmlFor="feedback-summary">反馈摘要</Label><Textarea id="feedback-summary" value={feedbackSummary} onChange={(event) => setFeedbackSummary(event.target.value)} placeholder="记录面试关键事实与结论依据" maxLength={2000} /></div>
               </div>
             )}

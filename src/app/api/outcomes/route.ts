@@ -30,6 +30,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 面试反馈可关联提纲：校验提纲属于本组织且对应同一条匹配记录，题目命中结果与提纲一致
+    const guideId = typeof body.metadata?.interview_guide_id === 'string'
+      ? body.metadata.interview_guide_id
+      : null;
+    if (guideId) {
+      const { data: guideRow, error: guideError } = await supabase
+        .from('interview_guides')
+        .select('questions')
+        .eq('id', guideId)
+        .eq('organization_id', user.organizationId)
+        .eq('match_record_id', body.match_record_id)
+        .maybeSingle();
+      if (guideError) {
+        throw new Error(`查询面试提纲失败: ${guideError.message}`);
+      }
+      if (!guideRow) {
+        return NextResponse.json(
+          { success: false, error: '面试提纲不存在或与当前匹配记录不一致' },
+          { status: 400 },
+        );
+      }
+      const questionResults = Array.isArray(body.metadata?.question_results)
+        ? body.metadata.question_results
+        : [];
+      if (questionResults.length > 0) {
+        const guideQuestions = Array.isArray(guideRow.questions?.targeted_questions)
+          ? guideRow.questions.targeted_questions
+          : [];
+        const questionByText = new Map<string, { origin?: unknown }>();
+        for (const item of guideQuestions) {
+          if (typeof item?.question === 'string') {
+            questionByText.set(item.question, { origin: item.origin });
+          }
+        }
+        for (const result of questionResults) {
+          const expected = questionByText.get(result.question);
+          if (!expected || expected.origin !== result.origin) {
+            return NextResponse.json(
+              { success: false, error: '题目命中结果与关联提纲不一致' },
+              { status: 400 },
+            );
+          }
+        }
+      }
+    }
+
     const rpcName = body.writeback_connection_id
       ? 'record_recruiting_outcome_with_writeback'
       : 'record_recruiting_outcome';

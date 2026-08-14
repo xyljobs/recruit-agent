@@ -135,3 +135,22 @@
 body {
   @apply font-sans;
 }
+
+/* 面试提纲导出打印：仅打印 .interview-guide-print 容器（由短名单打印按钮临时挂载） */
+@media print {
+  body > *:not(.interview-guide-print) {
+    display: none;
+  }
+  .interview-guide-print {
+    display: block;
+    padding: 24px 32px;
+    color: #0f172a;
+    background: #ffffff;
+  }
+  .interview-guide-print-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.9;
+  }
+}

@@ -12,6 +12,7 @@ export const RATE_LIMITS = {
   jdParse: { scope: 'jd:parse' },
   jdGenerate: { scope: 'jd:generate' },
   interviewGuide: { scope: 'interview:guide' },
+  interviewGuideRead: { scope: 'interview:guide:read' },
   interviewBankRead: { scope: 'interview:bank:read' },
   interviewBankWrite: { scope: 'interview:bank:write' },
   bossKeywords: { scope: 'boss:keywords' },

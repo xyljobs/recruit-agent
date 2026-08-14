@@ -272,6 +272,20 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
     }
   }
 
+  // 打印导出：临时挂载打印容器，@media print 规则只渲染该容器（见 globals.css）
+  function printGuide() {
+    if (!guide) return;
+    const host = document.createElement('div');
+    host.className = 'interview-guide-print';
+    const body = document.createElement('pre');
+    body.className = 'interview-guide-print-body';
+    body.textContent = guideToPlainText(guide.content, guide.candidate_name);
+    host.appendChild(body);
+    document.body.appendChild(host);
+    window.print();
+    host.remove();
+  }
+
   const candidateName = entry.candidate?.name || `候选人 ${entry.rank}`;
   const authorization = entry.candidate?.authorization;
 
@@ -376,7 +390,7 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
                   </div>
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => void copyGuide()}><Copy className="mr-1.5 h-3.5 w-3.5" />复制全文</Button>
-                    <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="mr-1.5 h-3.5 w-3.5" />打印</Button>
+                    <Button variant="outline" size="sm" onClick={printGuide}><Printer className="mr-1.5 h-3.5 w-3.5" />打印</Button>
                   </div>
                 </div>
                 <div className="space-y-6 p-4">

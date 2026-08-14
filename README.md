@@ -185,6 +185,7 @@ GitHub Actions 对每次推送运行 `validate` + 单元测试 + Python Worker �
 - [docs/评测报告_2026-08.md](docs/评测报告_2026-08.md) — IT 单岗位真实数据基线：Spearman 0.706、NDCG@10 0.844、Precision@5 0.400、强推召回率@10 4/4（可复现，不外推为制造业结论）
 - [docs/evidence/java-resume-source-audit-2026-08-09.md](docs/evidence/java-resume-source-audit-2026-08-09.md) — 20 份授权 Java PDF 的本地完整性、匿名映射与结构化差异核对
 - [docs/制造业评测方案.md](docs/制造业评测方案.md) — PLC / 工业机器人 / 设备维护三岗位正式评测协议与验收门槛
+- [outputs/019fef1a-mfg-final-v1/制造业三岗位真实简历评测审计报告_V1.xlsx](outputs/019fef1a-mfg-final-v1/制造业三岗位真实简历评测审计报告_V1.xlsx) — 制造业三岗位 58 份真实简历 HR 与 AI 双轨标注审计：一致率 34.5%、加权 κ=0.280，定位“提供证据、人工决策”，不宣称专家真值
 - [docs/第三方依赖与发布边界.md](docs/第三方依赖与发布边界.md) — 直接依赖、外部服务与参赛发布边界
 - [docs/evidence/README.md](docs/evidence/README.md) — 运行证据与质量门禁证据包
 - [docs/evidence/从零复现演练_2026-08-05.md](docs/evidence/从零复现演练_2026-08-05.md) — Docker 全链路从零复现演练与回归修复记录

@@ -17,7 +17,7 @@ import {
 
 const RUN_FIELDS = 'id,job_id,requested_by,source_match_batch_task_id,status,candidate_count,top_n,scoring_schema_version,scoring_weights_version,confidence_formula_version,requested_at,completed_at,review_started_at,qualified_at,qualified_by,error_message' as const;
 
-const ENTRY_FIELDS = 'id,shortlist_run_id,match_record_id,candidate_id,rank,recommendation_band,confidence_score,confidence_breakdown,evidence_snapshot,missing_information,human_decision,override_reason_code,override_note,reviewed_by,reviewed_at,created_at,candidate:candidates(id,name,current_company,current_position,data_source,is_authorized,updated_at),match_record:match_records(overall_score,skill_score,experience_score,education_score,salary_score,location_score,availability_score,stability_score)' as const;
+const ENTRY_FIELDS = 'id,shortlist_run_id,match_record_id,candidate_id,rank,recommendation_band,confidence_score,confidence_breakdown,evidence_snapshot,missing_information,human_decision,override_reason_code,override_note,reviewed_by,reviewed_at,created_at,candidate:candidates(id,name,current_company,current_position,data_source,is_authorized,updated_at,experience_years,verified_experience_years,experience_years_status,education,skills),match_record:match_records(overall_score,skill_score,experience_score,education_score,salary_score,location_score,availability_score,stability_score,match_details)' as const;
 
 export async function POST(request: NextRequest) {
   try {
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     if (candidateIds.length > 0) {
       const { data: authorizations, error: authorizationError } = await supabase
         .from('authorization_records')
-        .select('candidate_id,source_type,authorized_at,processing_expires_at,is_active,evidence_status')
+        .select('candidate_id,source_type,authorized_at,processing_expires_at,is_active,evidence_status,automated_decision_objected_at')
         .eq('organization_id', user.organizationId)
         .in('candidate_id', candidateIds)
         .order('authorized_at', { ascending: false });
@@ -124,6 +124,7 @@ export async function GET(request: NextRequest) {
           到岗: matchRecord.availability_score,
           稳定性: matchRecord.stability_score,
         };
+        entry.match_details = matchRecord.match_details ?? null;
       }
       delete entry.match_record;
       const runId = entry.shortlist_run_id as string;

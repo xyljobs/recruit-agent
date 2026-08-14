@@ -7,6 +7,14 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
+import type { ShortlistDecision } from './decision-types';
+
+export const DECISION_LABELS: Record<ShortlistDecision, string> = {
+  unreviewed: '待人工判断',
+  accepted: '已接受',
+  needs_information: '需补充信息',
+  overridden: '已人工覆盖',
+};
 
 export const STATUS_CONFIG: Record<
   string,

@@ -24,19 +24,18 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
+import { collectHardConstraints, deriveMatchVerdict } from '@/lib/matching/verdict';
 import { cn } from '@/lib/utils';
+import { DECISION_LABELS } from '../constants';
 import type { ShortlistDecision, ShortlistEntry, ShortlistRun } from '../decision-types';
 import { useWorkspaceData } from '../hooks/use-workspace-data';
 import { normalizeShortlistRuns } from '../lib/decision-ui';
-
-const DECISION_LABELS: Record<ShortlistDecision, string> = {
-  unreviewed: '待人工判断',
-  accepted: '已接受',
-  needs_information: '需补充信息',
-  overridden: '已人工覆盖',
-};
+import type { Candidate, MatchRecord } from '../types';
+import { CandidateDetailDialog } from './candidate-dialogs';
+import { MatchRankingTable } from './match-ranking-table';
 
 const REASON_OPTIONS = [
   ['missing_context', '缺少业务背景'],
@@ -104,6 +103,26 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
   const [preparing, setPreparing] = useState(false);
   const [brief, setBrief] = useState<PreparedCommunicationBrief | null>(null);
 
+  const verdict = useMemo(() => {
+    const skillAnalysis = entry.match_details?.skill_analysis;
+    const matched = skillAnalysis?.matched ?? [];
+    const missing = skillAnalysis?.missing ?? [];
+    return deriveMatchVerdict({
+      overall_score: entry.overall_score ?? null,
+      confidence_score: entry.confidence_score,
+      required_skill_total: matched.length + missing.length,
+      required_skill_matched: matched.length,
+      hard_constraints: collectHardConstraints({
+        authorization_is_active: entry.candidate?.authorization?.is_active,
+        processing_expires_at: entry.candidate?.authorization?.processing_expires_at,
+        automated_decision_objected_at: entry.candidate?.authorization?.automated_decision_objected_at,
+        skill_matched: matched,
+        skill_missing: missing,
+      }),
+      boundary_flags: [],
+    });
+  }, [entry]);
+
   async function saveDecision() {
     if (decision === 'overridden' && !reasonCode) {
       toast.error('覆盖推荐时必须选择原因');
@@ -160,14 +179,21 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
   const authorization = entry.candidate?.authorization;
 
   return (
-    <Card className="gap-0 overflow-hidden border-slate-200 py-0 shadow-none">
+    <Card id={`entry-card-${entry.id}`} className="gap-0 overflow-hidden border-slate-200 py-0 shadow-none">
       <div className="grid border-b border-slate-200 lg:grid-cols-[6rem_1fr_auto]">
         <div className="flex items-center justify-center bg-slate-950 px-4 py-5 text-white">
           <div className="text-center"><span className="block text-xs text-slate-400">优先序</span><strong className="mt-1 block text-3xl">{entry.rank}</strong></div>
         </div>
         <div className="p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h3 className="text-lg font-semibold text-slate-950">{candidateName}</h3><p className="mt-1 text-sm text-slate-500">{[entry.candidate?.current_position, entry.candidate?.current_company].filter(Boolean).join(' · ') || '职位信息待补充'}</p></div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-semibold text-slate-950">{candidateName}</h3>
+                <Badge variant="outline" className={verdict.tone}>{verdict.label}</Badge>
+                {entry.human_decision === 'overridden' && <Badge className="bg-violet-100 text-violet-800">已人工覆盖</Badge>}
+              </div>
+              <p className="mt-1 text-sm text-slate-500">{[entry.candidate?.current_position, entry.candidate?.current_company].filter(Boolean).join(' · ') || '职位信息待补充'}</p>
+            </div>
             <Badge variant="outline" className={confidenceTone(entry.confidence_score)}>证据置信度 {entry.confidence_score}%</Badge>
           </div>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
@@ -257,11 +283,13 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
 }
 
 export function ShortlistsWorkspace() {
-  const { jobs } = useWorkspaceData();
+  const { jobs, candidates, matchRecords } = useWorkspaceData();
   const [runs, setRuns] = useState<ShortlistRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState('');
   const [loading, setLoading] = useState(true);
   const [qualifying, setQualifying] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
+  const [profileCandidateId, setProfileCandidateId] = useState<string | null>(null);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -284,6 +312,59 @@ export function ShortlistsWorkspace() {
   const selectedRun = useMemo(() => runs.find((run) => run.id === selectedRunId) ?? null, [runs, selectedRunId]);
   const reviewedCount = selectedRun?.entries.filter((entry) => entry.human_decision !== 'unreviewed').length ?? 0;
   const acceptedCount = selectedRun?.entries.filter((entry) => entry.human_decision === 'accepted').length ?? 0;
+
+  const profileCandidate = useMemo(() => {
+    if (!profileCandidateId) return null;
+    const direct = candidates.find((candidate) => candidate.id === profileCandidateId);
+    if (direct) return direct;
+    const entry = selectedRun?.entries.find((item) => item.candidate_id === profileCandidateId);
+    if (!entry) return null;
+    const minimal: Candidate = {
+      id: entry.candidate_id,
+      name: entry.candidate?.name ?? '候选人',
+      email: null,
+      phone: null,
+      current_company: entry.candidate?.current_company ?? null,
+      current_position: entry.candidate?.current_position ?? null,
+      experience_years: entry.candidate?.experience_years ?? null,
+      verified_experience_years: entry.candidate?.verified_experience_years ?? null,
+      experience_years_status: entry.candidate?.experience_years_status ?? null,
+      experience_years_evidence: null,
+      education: entry.candidate?.education ?? null,
+      skills: entry.candidate?.skills ?? null,
+      resume_text: null,
+      created_at: '',
+      authorization: null,
+    };
+    return minimal;
+  }, [profileCandidateId, selectedRun, candidates]);
+
+  const profileMatchRecord = useMemo(() => {
+    if (!profileCandidateId || !selectedRun) return null;
+    return matchRecords.find(
+      (record) => record.job_id === selectedRun.job_id && record.candidate_id === profileCandidateId,
+    ) ?? null;
+  }, [profileCandidateId, selectedRun, matchRecords]);
+
+  const profileIncomplete = profileCandidate !== null
+    && !candidates.some((candidate) => candidate.id === profileCandidateId);
+
+  function gotoDecision(entryId: string) {
+    setViewMode('card');
+    // 卡片视图切换后目标卡片才挂载；先等一帧渲染，再滚动定位。
+    window.setTimeout(() => {
+      const target = document.getElementById(`entry-card-${entryId}`);
+      if (!target) return;
+      const before = window.scrollY;
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // smooth 滚动在禁用动画的环境（自动化浏览器/reduced-motion）下可能不生效，兜底立即定位。
+      window.setTimeout(() => {
+        if (window.scrollY === before) {
+          target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }
+      }, 300);
+    }, 80);
+  }
 
   function jobTitle(run: ShortlistRun): string {
     return run.job?.title || jobs.find((job) => job.id === run.job_id)?.title || run.job_id;
@@ -326,9 +407,46 @@ export function ShortlistsWorkspace() {
               <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{selectedRun?.candidate_count ?? 0} 位候选人</Badge><Badge variant="outline">已审 {reviewedCount}/{selectedRun?.entries.length ?? 0}</Badge>{selectedRun?.qualified_at ? <Badge className="bg-emerald-100 text-emerald-800"><UserCheck className="mr-1 h-3 w-3" />HR 已确认合格</Badge> : <Button size="sm" onClick={() => void qualifyRun()} disabled={qualifying || acceptedCount === 0}><UserCheck className="mr-2 h-4 w-4" />{qualifying ? '确认中…' : '确认合格短名单'}</Button>}</div>
             </CardContent>
           </Card>
-          {selectedRun?.entries.length ? <div className="space-y-5">{[...selectedRun.entries].sort((left, right) => left.rank - right.rank).map((entry) => <ShortlistEntryCard key={entry.id} entry={entry} onChanged={loadRuns} />)}</div> : <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>短名单正在准备</AlertTitle><AlertDescription>当前批次尚无可审阅条目，请稍后刷新。</AlertDescription></Alert>}
+          {selectedRun && (
+            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'table' | 'card')}>
+              <TabsList>
+                <TabsTrigger value="table">排序表（横向比较）</TabsTrigger>
+                <TabsTrigger value="card">逐条审阅（记录决策）</TabsTrigger>
+              </TabsList>
+              <TabsContent value="table" className="space-y-4">
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-xs leading-5 text-slate-700">
+                  本批筛选口径：结论等级由规则层依据综合分、证据置信度与必需技能覆盖率派生，仅用于安排评估优先级；“不建议推进”必须附具体原因，且可由 HR 人工覆盖。排序分不用于自动拒绝候选人。
+                </div>
+                <MatchRankingTable
+                  entries={selectedRun.entries}
+                  onOpenProfile={(candidateId) => setProfileCandidateId(candidateId)}
+                  onGotoDecision={gotoDecision}
+                />
+              </TabsContent>
+              <TabsContent value="card">
+                {selectedRun.entries.length ? (
+                  <div className="space-y-5">
+                    {[...selectedRun.entries].sort((left, right) => left.rank - right.rank).map((entry) => (
+                      <ShortlistEntryCard key={entry.id} entry={entry} onChanged={loadRuns} />
+                    ))}
+                  </div>
+                ) : (
+                  <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>短名单正在准备</AlertTitle><AlertDescription>当前批次尚无可审阅条目，请稍后刷新。</AlertDescription></Alert>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
         </>
       )}
+      <CandidateDetailDialog
+        candidate={profileCandidate}
+        matchRecord={profileMatchRecord}
+        open={profileCandidateId !== null}
+        onOpenChange={(open) => {
+          if (!open) setProfileCandidateId(null);
+        }}
+        incompleteHint={profileIncomplete}
+      />
     </div>
   );
 }

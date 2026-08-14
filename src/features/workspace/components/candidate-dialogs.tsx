@@ -852,11 +852,13 @@ export function CandidateDetailDialog({
   matchRecord,
   open,
   onOpenChange,
+  incompleteHint = false,
 }: {
   candidate: Candidate | null;
   matchRecord: MatchRecord | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  incompleteHint?: boolean;
 }) {
   const { reloadMatchRecords } = useWorkspaceData();
   const [requestReference, setRequestReference] = useState('');
@@ -919,6 +921,11 @@ export function CandidateDetailDialog({
         <DialogHeader>
           <DialogTitle>候选人详情</DialogTitle>
         </DialogHeader>
+        {incompleteHint && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+            部分资料需到候选人库查看
+          </div>
+        )}
         {candidate && (
           <div className="space-y-4 py-4">
             <div className="flex items-center gap-4">

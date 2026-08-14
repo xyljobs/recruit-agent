@@ -28,17 +28,30 @@ export interface ShortlistEntry {
   reviewed_at: string | null;
   overall_score?: number | null;
   score_breakdown?: Record<string, number | null> | null;
+  match_details?: {
+    strengths?: string[];
+    gaps?: string[];
+    recommendations?: string;
+    skill_analysis?: { matched?: string[]; missing?: string[]; bonus_matched?: string[] };
+    llm_supplement?: { summary?: string; evidence?: Array<{ dimension: string; finding: string; source: string }> };
+  } | null;
   candidate?: {
     id: string;
     name: string;
     current_position?: string | null;
     current_company?: string | null;
+    experience_years?: number | null;
+    verified_experience_years?: number | null;
+    experience_years_status?: 'confirmed' | 'partial' | 'unknown' | null;
+    education?: string | null;
+    skills?: string[] | null;
     authorization?: {
       source_type?: string | null;
       authorized_at?: string | null;
       processing_expires_at?: string | null;
       is_active?: boolean;
       evidence_status?: string | null;
+      automated_decision_objected_at?: string | null;
     } | null;
   } | null;
 }

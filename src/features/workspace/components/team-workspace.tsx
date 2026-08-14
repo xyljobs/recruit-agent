@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Copy,
+  KeyRound,
   Mail,
   RefreshCw,
   Trash2,
@@ -76,6 +77,8 @@ export function TeamWorkspace() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'hr' | 'admin'>('hr');
   const [expiresInDays, setExpiresInDays] = useState(7);
+  const [acceptToken, setAcceptToken] = useState('');
+  const [accepting, setAccepting] = useState(false);
 
   const loadInvitations = useCallback(async () => {
     setLoading(true);
@@ -148,6 +151,33 @@ export function TeamWorkspace() {
     }
   }
 
+  // 已注册用户凭邀请码加入另一组织（多组织成员能力），成功后可在右上角切换组织
+  async function handleAcceptInvite(event: React.FormEvent) {
+    event.preventDefault();
+    const token = acceptToken.trim();
+    if (!token) {
+      toast.error('请输入邀请码');
+      return;
+    }
+    setAccepting(true);
+    try {
+      const response = await authFetch('/api/auth/invitations/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteToken: token }),
+      });
+      const result: { success?: boolean; data?: { organization_name?: string }; error?: string } = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || '加入组织失败');
+      toast.success(`已加入组织「${result.data?.organization_name ?? ''}」，可在右上角组织选择器切换`);
+      setAcceptToken('');
+      await loadInvitations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '加入组织失败');
+    } finally {
+      setAccepting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -155,7 +185,7 @@ export function TeamWorkspace() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Controlled access</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">团队成员</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            邀请同事加入本组织。受邀人凭一次性邀请码注册，注册后自动获得所选角色。
+            邀请同事加入本组织。受邀人无账号时凭一次性邀请码注册；已有账号的用户在下方直接接受邀请码即可加入，无需重新注册。
           </p>
         </div>
         <Button variant="outline" onClick={() => void loadInvitations()} disabled={loading}>
@@ -207,6 +237,33 @@ export function TeamWorkspace() {
             </div>
             <Button type="submit" disabled={creating}>
               {creating ? '生成中...' : '生成邀请码'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200 shadow-none">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><KeyRound className="h-4 w-4 text-blue-700" />已有账号加入组织</CardTitle>
+          <CardDescription>
+            同一邮箱的全局账号可加入多个组织（租户）。输入其他组织管理员发给您的邀请码即可加入，邀请码必须与该账号的登录邮箱一致；加入后可在顶部导航栏切换组织。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleAcceptInvite} className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="accept-invite-token">邀请码</Label>
+              <Input
+                id="accept-invite-token"
+                type="text"
+                autoComplete="one-time-code"
+                placeholder="请输入其他组织提供的邀请码"
+                value={acceptToken}
+                onChange={(event) => setAcceptToken(event.target.value)}
+              />
+            </div>
+            <Button type="submit" variant="outline" disabled={accepting}>
+              {accepting ? '加入中...' : '接受邀请并加入'}
             </Button>
           </form>
         </CardContent>

@@ -476,6 +476,46 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
   );
 }
 
+function ShortlistConceptGuide() {
+  return (
+    <Collapsible className="rounded-xl border border-blue-200 bg-blue-50/60">
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="w-full justify-start px-4 text-blue-800 hover:bg-blue-100/60 hover:text-blue-900">
+          <CircleHelp className="mr-2 h-4 w-4" />什么是短名单？首次使用先看这里
+          <ChevronDown className="ml-2 h-4 w-4" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">
+        <div className="grid gap-4 pt-2 lg:grid-cols-3">
+          <div className="rounded-lg border border-blue-100 bg-white p-4">
+            <h4 className="text-sm font-semibold text-slate-900">短名单是什么</h4>
+            <p className="mt-2 text-sm leading-6 text-slate-600">短名单是系统针对某个职位，从候选人库中筛选出的「值得人工重点评估的一小批候选人」，按优先序排列。它不是最终录用决定，只是帮你把注意力集中在最可能合适的少数人身上。</p>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-white p-4">
+            <h4 className="text-sm font-semibold text-slate-900">短名单从哪来</h4>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
+              <li>在<Link href="/jobs" className="mx-0.5 font-medium text-blue-700 underline underline-offset-4">职位与标准</Link>中解析 JD、确认用人标准；</li>
+              <li>系统自动搜索候选人并做批量智能匹配；</li>
+              <li>匹配结果按职位生成短名单批次，出现在本页。</li>
+            </ol>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-white p-4">
+            <h4 className="text-sm font-semibold text-slate-900">在这里要做什么</h4>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
+              <li>在「排序表」横向比较全批次候选人的结论与依据，点候选人姓名查看画像；</li>
+              <li>查看每位候选人的匹配证据与缺失信息；</li>
+              <li>记录人工决策：接受推荐 / 补充信息 / 覆盖推荐（均会留痕）；</li>
+              <li>对已接受的候选人生成沟通话术，确认后再触达；</li>
+              <li>全部审阅后点「确认合格短名单」完成本轮人工审查。</li>
+            </ol>
+            <p className="mt-2 text-xs leading-5 text-slate-500">排序分仅供查阅，系统不会用它自动拒绝任何候选人，最终决定权始终在人。</p>
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export function ShortlistsWorkspace() {
   const { jobs, candidates, matchRecords } = useWorkspaceData();
   const [runs, setRuns] = useState<ShortlistRun[]>([]);
@@ -602,9 +642,11 @@ export function ShortlistsWorkspace() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Human review</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">候选人短名单</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">先审证据和缺失信息，再做人工判断。排序分隐藏在明细中，不能用于自动拒绝。</p></div>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Human review</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">候选人短名单</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">短名单是系统按职位筛选出的一小批值得重点评估的候选人。先审证据和缺失信息，再做人工判断。排序分隐藏在明细中，不能用于自动拒绝。</p></div>
         <Button variant="outline" onClick={() => void loadRuns()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新短名单</Button>
       </div>
+
+      <ShortlistConceptGuide />
 
       {loading ? <div className="space-y-4"><Skeleton className="h-24 rounded-xl" /><Skeleton className="h-96 rounded-xl" /></div> : runs.length === 0 ? (
         <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>还没有短名单</AlertTitle><AlertDescription>请先在<Link href="/jobs" className="mx-1 font-medium text-blue-700 underline underline-offset-4">职位与标准</Link>中确认职位，再发起短名单生成。</AlertDescription></Alert>

@@ -361,6 +361,32 @@ async function assertDecisionCopilotBehavior(pool) {
   const offer = await recordOutcome('offer', outcomeClientIds.offer, '2026-07-03T00:00:00Z');
   await recordOutcome('interview_scheduled', outcomeClientIds.lateInterview, '2026-07-02T00:00:00Z');
   const hired = await recordOutcome('hired', outcomeClientIds.hired, '2026-07-04T00:00:00Z');
+  // P1-3：轻量事件（interview_feedback / offer_details）不推进阶段，metadata 持久化
+  const feedbackClientId = '90000000-0000-4000-8000-000000000009';
+  const feedback = await withClaims(pool, claimsA, client => client.query(
+    `SELECT record_recruiting_outcome($1, 'interview_feedback', 'human', $2, '2026-07-05T00:00:00Z', NULL, NULL, NULL, NULL, '{"summary":"技术面试通过","verdict":"pass"}'::jsonb) AS result`,
+    [ids.matchA, feedbackClientId],
+  ));
+  if (feedback.rows[0].result.current_status !== 'hired') {
+    throw new Error('interview feedback advanced a terminal recruiting status');
+  }
+  const offerDetailsClientId = '90000000-0000-4000-8000-000000000010';
+  const offerDetails = await withClaims(pool, claimsA, client => client.query(
+    `SELECT record_recruiting_outcome($1, 'offer_details', 'human', $2, '2026-07-05T00:00:00Z', NULL, NULL, NULL, NULL, '{"compensation_note":"月薪面议","approval_note":"已过薪酬审批"}'::jsonb) AS result`,
+    [ids.matchA, offerDetailsClientId],
+  ));
+  if (offerDetails.rows[0].result.current_status !== 'hired') {
+    throw new Error('offer details advanced a terminal recruiting status');
+  }
+  const { rows: metadataRows } = await pool.query(
+    `SELECT metadata->>'verdict' AS verdict, metadata->>'compensation_note' AS compensation_note
+       FROM recruiting_outcome_events WHERE client_event_id = ANY($1)`,
+    [[feedbackClientId, offerDetailsClientId]],
+  );
+  if (metadataRows.length !== 2 || !metadataRows.some(row => row.verdict === 'pass')
+    || !metadataRows.some(row => row.compensation_note === '月薪面议')) {
+    throw new Error('outcome metadata was not persisted');
+  }
   const duplicateOffer = await recordOutcome('offer', outcomeClientIds.offer, '2026-07-03T00:00:00Z');
   if (!duplicateOffer.rows[0].result.idempotent || offer.rows[0].result.current_status !== 'offered') {
     throw new Error('outcome idempotency or forward state transition failed');

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Copy, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Copy, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { authFetch, setAuthToken } from '@/lib/auth-client';
+import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -148,9 +149,7 @@ export default function SecurityPage() {
       <div className="mx-auto w-full max-w-xl py-8">
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30">
-              <Building2 className="h-6 w-6 text-white" />
-            </div>
+            <BrandLogo className="h-12 w-12 drop-shadow-lg drop-shadow-blue-500/30" />
             <div>
               <h1 className="text-xl font-bold text-gray-900">账号安全</h1>
               <p className="text-sm text-gray-500">人才决策Agent 双重验证</p>

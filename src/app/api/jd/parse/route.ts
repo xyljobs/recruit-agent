@@ -4,8 +4,8 @@ import { createTenantAiExecutionGateway } from '@/lib/ai/gateway';
 import { getTenantRequestContext } from '@/lib/auth-server';
 import { JD_JSON_BODY_LIMIT, jdParseBodySchema, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
-import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 import { parseExperienceBand } from '@/lib/matching/screening-rubric';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 
 const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职位描述(JD)并提取关键信息。
 
@@ -22,20 +22,22 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
 ## 技能要求（关键字段）
 7. 必需技能 (skills_required) - 数组格式，JD明确要求的技能
 8. 加分技能 (bonus_skills) - 数组格式，JD中提到"优先"、"加分"、"最好有"的技能
+9. 搜索关键词 (search_keywords) - 数组格式，6-10 个用于在招聘平台搜索人才的精炼关键词
+    要求：包含职位别名（如"Java后端"→"后端工程师"、"Java开发工程师"）、核心技术词与同义词；每个关键词 2-10 字；不得包含"熟悉/精通/3年以上/经验/优先"等描述性语句
 
 ## 岗位详情
-9. 岗位职责 (responsibilities) - 数组格式
-10. 福利待遇 (benefits) - 数组格式
-11. 紧急程度 (urgency) - 枚举值: urgent(紧急)/high(较高)/normal(常规)
+10. 岗位职责 (responsibilities) - 数组格式
+11. 福利待遇 (benefits) - 数组格式
+12. 紧急程度 (urgency) - 枚举值: urgent(紧急)/high(较高)/normal(常规)
 
 ## 智能分析（关键字段）
-12. 隐含需求 (implicit_requirements) - 数组格式，从JD中推断出的未明确说明的需求
+13. 隐含需求 (implicit_requirements) - 数组格式，从JD中推断出的未明确说明的需求
     例如："有大型项目经验" → 需要3年以上经验、有架构能力
          "抗压能力强" → 可能加班多，需要强调成长空间
          "熟悉微服务" → 需要Spring Cloud + Docker + 服务治理经验
-13. 完整度 (completeness) - 0-100分，JD信息的完整程度
-14. 缺失字段 (missing_fields) - 数组格式，JD中缺失的重要字段名称
-15. 经验年限区间 (experience_band) - 对象，从JD的年限要求中提取：
+14. 完整度 (completeness) - 0-100分，JD信息的完整程度
+15. 缺失字段 (missing_fields) - 数组格式，JD中缺失的重要字段名称
+16. 经验年限区间 (experience_band) - 对象，从JD的年限要求中提取：
     { "min": 最低年限数值或null, "preferred_max": 优先上限数值或null, "hard_max": 硬上限数值或null, "source": "explicit"或"inferred" }
     提取规则：
     - "3-5年" → min=3, preferred_max=5, hard_max=null
@@ -56,6 +58,7 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
   "education_required": "学历要求",
   "skills_required": ["必需技能1", "必需技能2"],
   "bonus_skills": ["加分技能1", "加分技能2"],
+  "search_keywords": ["Java", "后端工程师", "Spring Boot", "MySQL", "Redis", "微服务"],
   "responsibilities": ["职责1", "职责2"],
   "benefits": ["福利1", "福利2"],
   "urgency": "normal",
@@ -78,7 +81,7 @@ export async function POST(request: NextRequest) {
   try {
     const { supabase, user } = await getTenantRequestContext(request);
     await enforceRateLimit(supabase, RATE_LIMITS.jdParse);
-    const { jdContent } = await parseLimitedJson(
+    const { jdContent, jobId } = await parseLimitedJson(
       request,
       jdParseBodySchema,
       JD_JSON_BODY_LIMIT,
@@ -128,7 +131,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 保存到数据库
+    // 保存到数据库（传入 jobId 时更新已有职位，否则新建）
     // 年限区间口径（计划 §4.2/§4.4）：hard_max_enabled 由服务端按 JD 原文重算，
     // 不信任 LLM 输出的 source；仅当 JD 年限表述含上限语义（以内/不超过/上限/最多）才启用硬门槛。
     const screeningRubric = buildScreeningRubric(
@@ -136,29 +139,61 @@ export async function POST(request: NextRequest) {
       parsedResult.experience_required,
       jdContent,
     );
+    const parsedFields = {
+      title: parsedResult.title || '未命名职位',
+      department: parsedResult.department,
+      location: parsedResult.location,
+      salary_range: parsedResult.salary_range,
+      salary_min: parsedResult.salary_min || null,
+      salary_max: parsedResult.salary_max || null,
+      experience_required: parsedResult.experience_required,
+      education_required: parsedResult.education_required,
+      skills_required: parsedResult.skills_required || [],
+      bonus_skills: parsedResult.bonus_skills || [],
+      responsibilities: parsedResult.responsibilities,
+      benefits: parsedResult.benefits,
+      urgency: parsedResult.urgency || 'normal',
+      implicit_requirements: parsedResult.implicit_requirements || [],
+      completeness: parsedResult.completeness || null,
+      missing_fields: parsedResult.missing_fields || [],
+      raw_jd: jdContent,
+      screening_rubric: screeningRubric,
+    };
+
+    if (jobId) {
+      const { data, error } = await supabase
+        .from('job_requirements')
+        .update({ ...parsedFields, updated_at: new Date().toISOString() })
+        .eq('id', jobId)
+        .eq('organization_id', user.organizationId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('更新JD失败:', error);
+        return NextResponse.json(
+          { error: '更新职位失败，该职位可能已不存在' },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: data.id,
+          ...parsedResult,
+          screening_rubric: screeningRubric,
+          created_at: data.created_at,
+        }
+      });
+    }
+
     const { data, error } = await supabase
       .from('job_requirements')
       .insert({
         organization_id: user.organizationId,
         owner_user_id: user.userId,
-        title: parsedResult.title || '未命名职位',
-        department: parsedResult.department,
-        location: parsedResult.location,
-        salary_range: parsedResult.salary_range,
-        salary_min: parsedResult.salary_min || null,
-        salary_max: parsedResult.salary_max || null,
-        experience_required: parsedResult.experience_required,
-        education_required: parsedResult.education_required,
-        skills_required: parsedResult.skills_required || [],
-        bonus_skills: parsedResult.bonus_skills || [],
-        responsibilities: parsedResult.responsibilities,
-        benefits: parsedResult.benefits,
-        urgency: parsedResult.urgency || 'normal',
-        implicit_requirements: parsedResult.implicit_requirements || [],
-        completeness: parsedResult.completeness || null,
-        missing_fields: parsedResult.missing_fields || [],
-        screening_rubric: screeningRubric,
-        raw_jd: jdContent,
+        ...parsedFields,
         status: 'active',
         activated_at: new Date().toISOString(),
       })

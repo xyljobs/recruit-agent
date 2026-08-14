@@ -19,11 +19,12 @@ interface LoginBody {
   email?: unknown;
   password?: unknown;
   mfaCode?: unknown;
+  organizationSlug?: unknown;
 }
 
 function invalidCredentials(): NextResponse {
   return NextResponse.json(
-    { success: false, error: '邮箱或密码错误' },
+    { success: false, error: '邮箱、密码或组织不匹配' },
     { status: 401 },
   );
 }
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest) {
       : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const mfaCode = typeof body.mfaCode === 'string' ? body.mfaCode.trim() : '';
+    const organizationSlug = typeof body.organizationSlug === 'string'
+      ? body.organizationSlug.trim().toLowerCase()
+      : '';
 
     if (
       !email
@@ -55,6 +59,12 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { success: false, error: '请输入有效的邮箱和密码' },
+        { status: 400 },
+      );
+    }
+    if (!organizationSlug) {
+      return NextResponse.json(
+        { success: false, error: '请选择组织' },
         { status: 400 },
       );
     }
@@ -85,36 +95,30 @@ export async function POST(request: NextRequest) {
       return invalidCredentials();
     }
 
-    const { data: membership, error: membershipError } = await supabase
-      .from('organization_members')
-      .select('organization_id, role, is_active')
-      .eq('user_id', user.id)
-      .eq('organization_id', user.organization_id)
-      .eq('is_active', true)
-      .single();
-    if (
-      membershipError
-      || !membership
-      || !user.organization_id
-      || membership.organization_id !== user.organization_id
-    ) {
-      return NextResponse.json(
-        { success: false, error: '账号未加入有效组织，请联系管理员' },
-        { status: 403 },
-      );
-    }
-
-    const { data: organization, error: organizationError } = await supabase
+    // 多组织模型：租户身份来自登录时所选组织的 organization_members 记录，
+    // 不再依赖 users.organization_id（该字段仅作主组织兼容用途）
+    const { data: organization } = await supabase
       .from('organizations')
       .select('id, name, is_active')
-      .eq('id', membership.organization_id)
+      .eq('slug', organizationSlug)
       .eq('is_active', true)
-      .single();
-    if (organizationError || !organization) {
-      return NextResponse.json(
-        { success: false, error: '所属组织已停用，请联系管理员' },
-        { status: 403 },
-      );
+      .maybeSingle();
+
+    const { data: membership } = organization
+      ? await supabase
+          .from('organization_members')
+          .select('organization_id, role, is_active')
+          .eq('user_id', user.id)
+          .eq('organization_id', organization.id)
+          .eq('is_active', true)
+          .maybeSingle()
+      : { data: null };
+
+    // 组织不存在/已停用或账号非该组织有效成员时，统一按凭据错误返回，
+    // 避免泄露"该邮箱属于哪些组织"的成员关系信息
+    if (!organization || !membership) {
+      await recordLoginFailure(request, email, user.id);
+      return invalidCredentials();
     }
 
     if (user.mfa_enabled === true) {
@@ -138,7 +142,6 @@ export async function POST(request: NextRequest) {
             .from('users')
             .update({ mfa_last_used_step: matchedStep })
             .eq('id', user.id)
-            .eq('organization_id', membership.organization_id)
             .eq('mfa_enabled', true)
             .lt('mfa_last_used_step', matchedStep)
             .select('id')
@@ -162,7 +165,6 @@ export async function POST(request: NextRequest) {
               mfa_recovery_codes: storedCodes.filter(code => code !== recoveryHash),
             })
             .eq('id', user.id)
-            .eq('organization_id', membership.organization_id)
             .contains('mfa_recovery_codes', [recoveryHash])
             .select('id')
             .maybeSingle();

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withBasePath } from '@/lib/base-path';
 import { verifyCurrentAuthSession } from '@/lib/auth-session';
 import { isBossSearchEnabled } from '@/lib/feature-flags';
 import { getRequestSecurityError } from '@/lib/request-security';
 
 // 公开路径（无需登录）
-const publicPaths = new Set(['/login', '/api/auth/login', '/api/auth/register']);
+const publicPaths = new Set(['/login', '/api/auth/login', '/api/auth/register', '/api/auth/organizations']);
 const publicApiPrefixes = ['/api/integrations/webhook/'];
 const passwordChangePaths = new Set([
   '/change-password',
@@ -24,6 +25,9 @@ const passwordChangePaths = new Set([
 const rolePermissions: Record<string, string[]> = {
   // 审计/系统类 — admin + system
   // (暂无独立审计 API，预留)
+
+  // 邀请接受面向所有已登录成员（含 hr）；必须置于 admin 前缀之前精确匹配
+  '/api/auth/invitations/accept': ['admin', 'hr'],
 
   // 业务类 — admin + hr
   '/api/auth/invitations': ['admin'],
@@ -93,7 +97,7 @@ export async function proxy(request: NextRequest) {
         try {
           const session = await verifyCurrentAuthSession(token);
           const destination = session.mustChangePassword ? '/change-password' : '/';
-          return NextResponse.redirect(new URL(destination, request.url));
+          return NextResponse.redirect(new URL(withBasePath(destination), request.url));
         } catch {
           // token无效，继续显示登录页
         }
@@ -138,7 +142,7 @@ export async function proxy(request: NextRequest) {
           { status: 403 }
         );
       }
-      return NextResponse.redirect(new URL('/change-password', request.url));
+      return NextResponse.redirect(new URL(withBasePath('/change-password'), request.url));
     }
 
     // RBAC: 检查角色权限
@@ -151,7 +155,7 @@ export async function proxy(request: NextRequest) {
             { status: 403 }
           );
         }
-        return NextResponse.redirect(new URL('/', request.url));
+        return NextResponse.redirect(new URL(withBasePath('/'), request.url));
       }
     }
 
@@ -164,7 +168,7 @@ export async function proxy(request: NextRequest) {
         { status: 401 }
       );
     }
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(new URL(withBasePath('/login'), request.url));
   }
 }
 

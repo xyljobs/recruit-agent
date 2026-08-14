@@ -8,6 +8,8 @@
  * - cookie 和 Authorization header 双通道，任一可用即可
  */
 
+import { withBasePath } from '@/lib/base-path';
+
 const TOKEN_KEY = 'auth_token';
 const CSRF_COOKIE_NAME = 'csrf_token';
 
@@ -50,7 +52,7 @@ export async function authFetch(input: string, init?: RequestInit): Promise<Resp
       headers.set('X-CSRF-Token', decodeURIComponent(csrfCookie.split('=').slice(1).join('=')));
     }
   }
-  return fetch(input, {
+  return fetch(withBasePath(input), {
     ...init,
     headers,
     credentials: 'include',

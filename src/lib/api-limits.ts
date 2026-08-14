@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const MAX_CANDIDATE_PAGE_SIZE = 100;
 export const MAX_CANDIDATE_PAGE = 10_000;
 export const MAX_JD_LENGTH = 20_000;
+export const MAX_RESUME_TEXT_LENGTH = 20_000;
 export const MAX_BOSS_KEYWORD_GROUPS = 5;
 export const MAX_BOSS_COUNT_PER_KEYWORD = 10;
 export const MAX_BOSS_TOTAL_COUNT = 40;
@@ -117,6 +118,7 @@ export const batchMatchStatusQuerySchema = z.object({
 
 export const jdParseBodySchema = z.object({
   jdContent: jdContentSchema,
+  jobId: idSchema.optional(),
 });
 
 export const candidateSearchBodySchema = z.strictObject({

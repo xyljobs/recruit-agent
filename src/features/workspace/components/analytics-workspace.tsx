@@ -1,10 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AlarmClock,
   ArrowRight,
+  CalendarCheck,
   CheckCircle2,
+  ClipboardCheck,
   Clock3,
   MessageCircleReply,
   RefreshCw,
@@ -69,6 +72,17 @@ interface DecisionMetrics {
     department: string | null;
     occurred_at: string;
   }>;
+}
+
+interface TodayTodoItem {
+  count: number;
+  path: string;
+}
+
+interface TodayTodos {
+  pending_decisions: TodayTodoItem;
+  outreach_due: TodayTodoItem;
+  interviews_today: TodayTodoItem;
 }
 
 const REASON_LABELS: Record<string, string> = {
@@ -182,6 +196,8 @@ export function AnalyticsWorkspace() {
   const [metrics, setMetrics] = useState<DecisionMetrics | null>(null);
   const [timeZone, setTimeZone] = useState('Asia/Shanghai');
   const [loading, setLoading] = useState(true);
+  const [todayTodos, setTodayTodos] = useState<TodayTodos | null>(null);
+  const [todayTodosFailed, setTodayTodosFailed] = useState(false);
 
   const loadMetrics = useCallback(async () => {
     setLoading(true);
@@ -208,6 +224,22 @@ export function AnalyticsWorkspace() {
     void loadMetrics();
   }, [loadMetrics]);
 
+  // 今日待办三卡：客户端独立 fetch，不依赖指标筛选，失败不阻塞指标页
+  useEffect(() => {
+    let active = true;
+    void authFetch('/api/today-todos')
+      .then(response => response.json())
+      .then((result: { success?: boolean; data?: TodayTodos }) => {
+        if (!active) return;
+        if (result.success && result.data) setTodayTodos(result.data);
+        else setTodayTodosFailed(true);
+      })
+      .catch(() => {
+        if (active) setTodayTodosFailed(true);
+      });
+    return () => { active = false; };
+  }, []);
+
   const overrideReasons = useMemo(
     () => Object.entries(metrics?.human_override.reasons ?? {}).sort((left, right) => right[1] - left[1]),
     [metrics],
@@ -230,6 +262,72 @@ export function AnalyticsWorkspace() {
         </div>
         <div className="h-1 bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400" />
       </section>
+
+      {todayTodos === null && !todayTodosFailed ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-28 rounded-xl" />)}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Link href={todayTodos?.pending_decisions.path ?? '/shortlists'} className="group">
+            <Card className="h-full gap-4 border-amber-200 bg-amber-50/60 shadow-none transition-colors group-hover:border-amber-300">
+              <CardHeader className="pb-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-sm font-medium text-slate-600">待审短名单</CardTitle>
+                    <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                      {todayTodosFailed ? '—' : todayTodos?.pending_decisions.count ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-amber-100 p-2 text-amber-700" aria-hidden="true"><ClipboardCheck className="h-5 w-5" /></div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <p className="text-xs leading-5 text-slate-500">AI 已给出优先级建议，等待你的逐条决策</p>
+                <p className="mt-2 flex items-center gap-1 text-sm font-medium text-blue-600">去处理<ArrowRight className="h-3.5 w-3.5" /></p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href={todayTodos?.outreach_due.path ?? '/outcomes'} className="group">
+            <Card className="h-full gap-4 border-red-200 bg-red-50/60 shadow-none transition-colors group-hover:border-red-300">
+              <CardHeader className="pb-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-sm font-medium text-slate-600">触达待办到期</CardTitle>
+                    <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                      {todayTodosFailed ? '—' : todayTodos?.outreach_due.count ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-red-100 p-2 text-red-700" aria-hidden="true"><AlarmClock className="h-5 w-5" /></div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <p className="text-xs leading-5 text-slate-500">截止日已到或逾期的候选人触达任务</p>
+                <p className="mt-2 flex items-center gap-1 text-sm font-medium text-blue-600">去处理<ArrowRight className="h-3.5 w-3.5" /></p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href={todayTodos?.interviews_today.path ?? '/outcomes'} className="group">
+            <Card className="h-full gap-4 border-blue-200 bg-blue-50/60 shadow-none transition-colors group-hover:border-blue-300">
+              <CardHeader className="pb-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-sm font-medium text-slate-600">今日面试</CardTitle>
+                    <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                      {todayTodosFailed ? '—' : todayTodos?.interviews_today.count ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-blue-100 p-2 text-blue-700" aria-hidden="true"><CalendarCheck className="h-5 w-5" /></div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <p className="text-xs leading-5 text-slate-500">今天安排面试的候选人</p>
+                <p className="mt-2 flex items-center gap-1 text-sm font-medium text-blue-600">去处理<ArrowRight className="h-3.5 w-3.5" /></p>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+      )}
 
       <Card className="gap-4 border-slate-200 shadow-none">
         <CardContent className="grid gap-4 pt-0 md:grid-cols-[1fr_1fr_1.5fr_auto] md:items-end">

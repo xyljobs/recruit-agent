@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (existingUser) {
       return NextResponse.json(
-        { error: '该邮箱已注册，请直接登录' },
+        { error: '该邮箱已注册，请直接登录后在团队成员页接受邀请加入组织' },
         { status: 400 },
       );
     }
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
           error: invalidInvite
             ? '邀请码无效、已使用或已过期'
             : duplicateEmail
-              ? '该邮箱已注册，请直接登录'
+              ? '该邮箱已注册，请直接登录后在团队成员页接受邀请加入组织'
               : '注册失败，请稍后重试',
         },
         { status: invalidInvite || duplicateEmail ? 400 : 500 },

@@ -71,7 +71,7 @@ export const organizationMembers = pgTable(
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("organization_members_user_unique").on(table.user_id),
+    uniqueIndex("organization_members_user_org_unique").on(table.user_id, table.organization_id),
     index("organization_members_organization_idx").on(table.organization_id),
   ]
 );
@@ -661,6 +661,53 @@ export const recruitingOutcomeEvents = pgTable(
   ],
 );
 
+// ============================================
+// 触达待办队列（短名单决策 accepted 后自动生成；供人才池再激活手动创建）
+// ============================================
+export const outreachTasks = pgTable(
+  "outreach_tasks",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    organization_id: varchar("organization_id", { length: 36 }).notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    job_id: varchar("job_id", { length: 36 }).notNull().references(() => jobRequirements.id, { onDelete: "cascade" }),
+    candidate_id: varchar("candidate_id", { length: 36 }).notNull().references(() => candidates.id, { onDelete: "cascade" }),
+    match_record_id: varchar("match_record_id", { length: 36 }).references(() => matchRecords.id, { onDelete: "set null" }),
+    shortlist_entry_id: varchar("shortlist_entry_id", { length: 36 }).references(() => shortlistEntries.id, { onDelete: "set null" }),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    due_at: timestamp("due_at", { withTimezone: true }).notNull(),
+    script_snapshot: text("script_snapshot"),
+    note: text("note"),
+    created_by: varchar("created_by", { length: 36 }).references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("outreach_tasks_org_status_due_idx").on(table.organization_id, table.status, table.due_at),
+    index("outreach_tasks_org_job_candidate_idx").on(table.organization_id, table.job_id, table.candidate_id),
+  ],
+);
+
+// ============================================
+// 发布台账（职位发布渠道登记，随职位级联删除）
+// ============================================
+export const jobPostings = pgTable(
+  "job_postings",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    organization_id: varchar("organization_id", { length: 36 }).notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    job_id: varchar("job_id", { length: 36 }).notNull().references(() => jobRequirements.id, { onDelete: "cascade" }),
+    platform: varchar("platform", { length: 50 }).notNull(),
+    url: text("url"),
+    note: text("note"),
+    posted_at: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
+    created_by: varchar("created_by", { length: 36 }).references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("job_postings_org_job_posted_idx").on(table.organization_id, table.job_id, table.posted_at),
+  ],
+);
+
 export const candidateRightsRequests = pgTable(
   "candidate_rights_requests",
   {
@@ -1194,6 +1241,7 @@ export type ShortlistRun = typeof shortlistRuns.$inferSelect;
 export type ShortlistEntry = typeof shortlistEntries.$inferSelect;
 export type RecommendationDecisionEvent = typeof recommendationDecisionEvents.$inferSelect;
 export type RecruitingOutcomeEvent = typeof recruitingOutcomeEvents.$inferSelect;
+export type OutreachTask = typeof outreachTasks.$inferSelect;
 export type CandidateRightsRequest = typeof candidateRightsRequests.$inferSelect;
 export type IntegrationConnection = typeof integrationConnections.$inferSelect;
 export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;

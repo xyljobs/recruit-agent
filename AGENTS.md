@@ -111,7 +111,7 @@
 | 域 | 接口 | 功能 |
 |------|------|------|
 | 认证 | /api/auth/login · logout · register · me · change-password · mfa · invitations | 登录/登出/注册/MFA/邀请 |
-| JD与职位 | /api/jd/parse (POST) · /api/jobs (GET) | JD智能解析、职位列表 |
+| JD与职位 | /api/jd/parse (POST) · /api/jobs (GET/POST) · /api/jobs/[id] (GET/PATCH/DELETE) | JD智能解析、职位列表/创建/启停、职位查询/编辑/删除 |
 | 候选人 | /api/candidates (GET/POST) · /api/candidates/[id]/revoke · decision-rights | 候选人CRUD、授权撤回与决策权 |
 | 匹配 | /api/match (POST) · /api/match/batch · /api/match-records (GET/PATCH) | 单人深度匹配、批量预筛、记录管理 |
 | 短名单 | /api/shortlists · [runId] · [runId]/entries/[entryId]/decision | 短名单与逐条决策 |

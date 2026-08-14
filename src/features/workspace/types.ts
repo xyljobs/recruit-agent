@@ -1,3 +1,10 @@
+export interface WorkspaceOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  role?: string;
+}
+
 export interface WorkspaceUser {
   id: string;
   name: string;
@@ -5,6 +12,8 @@ export interface WorkspaceUser {
   role: string;
   company?: string;
   must_change_password: boolean;
+  current_organization?: WorkspaceOrganization;
+  organizations?: WorkspaceOrganization[];
 }
 
 export interface ScreeningRubric {
@@ -15,6 +24,8 @@ export interface ScreeningRubric {
     source: 'explicit' | 'inferred';
     hard_max_enabled: boolean;
   } | null;
+  capability_priority?: string[];
+  bonus_caps?: Array<{ skill: string; max_bonus: number }>;
 }
 
 export interface Job {
@@ -27,6 +38,7 @@ export interface Job {
   education_required: string | null;
   skills_required: string[] | null;
   bonus_skills: string[] | null;
+  search_keywords?: string[] | null;
   responsibilities: string[] | null;
   benefits: string[] | null;
   urgency: string | null;

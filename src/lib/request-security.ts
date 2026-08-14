@@ -89,7 +89,9 @@ export function getRequestSecurityError(
     return '请求缺少来源信息';
   }
 
-  if (!cookieToken || bearerToken) {
+  // 公开变更（登录/注册）不依赖现有会话，残留的过期 auth_token cookie
+  // 不应把请求拖入 CSRF 校验（来源校验仍在上面执行，跨站伪造仍被拦截）
+  if (!cookieToken || bearerToken || publicMutation) {
     return null;
   }
 

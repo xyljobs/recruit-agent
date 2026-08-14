@@ -61,6 +61,52 @@ test('outcomes require human accountability fields', () => {
   }).success, false);
 });
 
+test('lightweight interview and offer events carry validated metadata', () => {
+  const base = {
+    match_record_id: id,
+    client_event_id: secondId,
+    occurred_at: '2026-08-01T12:00:00+08:00',
+  };
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'interview_scheduled',
+    metadata: {
+      scheduled_at: '2026-08-10T14:30:00+08:00',
+      method: '视频',
+      interviewers: ['王经理', '李主管'],
+    },
+  }).success, true);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'interview_scheduled',
+  }).success, false);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'interview_feedback',
+    metadata: { summary: '技术面试通过', verdict: 'pass' },
+  }).success, true);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'interview_feedback',
+    metadata: { summary: '技术面试通过', verdict: 'undecided' },
+  }).success, false);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'offer_details',
+    metadata: { compensation_note: '月薪面议' },
+  }).success, true);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'offer_details',
+    metadata: {},
+  }).success, false);
+  assert.equal(recruitingOutcomeBodySchema.safeParse({
+    ...base,
+    event_type: 'outreach_sent',
+    metadata: { anything: true },
+  }).success, false);
+});
+
 test('communication brief accepts one selection reference only', () => {
   assert.equal(communicationBriefBodySchema.safeParse({
     shortlist_entry_id: id,

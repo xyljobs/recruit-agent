@@ -35,15 +35,38 @@ export const shortlistEntryParamsSchema = z.strictObject({
   entryId: uuidSchema,
 });
 
+export const interviewScheduledMetadataSchema = z.strictObject({
+  scheduled_at: z.string().datetime({ offset: true }),
+  method: z.enum(['现场', '视频', '电话']),
+  interviewers: z.array(z.string().trim().min(1).max(100))
+    .min(1, '请填写至少一位面试官')
+    .max(20, '面试官最多 20 位'),
+});
+
+export const interviewFeedbackMetadataSchema = z.strictObject({
+  summary: boundedNoteSchema,
+  verdict: z.enum(['pass', 'fail', 'hold']),
+});
+
+export const offerDetailsMetadataSchema = z.strictObject({
+  compensation_note: z.string().trim().max(2000).optional(),
+  approval_note: z.string().trim().max(2000).optional(),
+}).refine(
+  (value) => Object.values(value).some(item => item !== undefined && item !== ''),
+  '请至少填写薪酬或审批说明之一',
+);
+
 export const recruitingOutcomeBodySchema = z.strictObject({
   match_record_id: uuidSchema,
   event_type: z.enum([
     'outreach_sent',
     'candidate_replied',
     'interview_scheduled',
+    'interview_feedback',
     'interview_completed',
     'qualified_interview',
     'offer',
+    'offer_details',
     'hired',
     'rejected',
     'withdrawn',
@@ -64,6 +87,7 @@ export const recruitingOutcomeBodySchema = z.strictObject({
     'withdrawn',
   ]).optional(),
   supersedes_event_id: uuidSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   writeback_connection_id: uuidSchema.optional(),
   writeback_client_event_id: uuidSchema.optional(),
 }).superRefine((body, context) => {
@@ -112,6 +136,41 @@ export const recruitingOutcomeBodySchema = z.strictObject({
       code: 'custom',
       path: ['target_stage'],
       message: '普通招聘结果不能携带阶段更正字段',
+    });
+  }
+
+  if (body.event_type === 'interview_scheduled') {
+    const parsed = interviewScheduledMetadataSchema.safeParse(body.metadata ?? {});
+    if (!parsed.success) {
+      context.addIssue({
+        code: 'custom',
+        path: ['metadata'],
+        message: parsed.error.issues[0]?.message ?? '面试安排信息不完整',
+      });
+    }
+  } else if (body.event_type === 'interview_feedback') {
+    const parsed = interviewFeedbackMetadataSchema.safeParse(body.metadata ?? {});
+    if (!parsed.success) {
+      context.addIssue({
+        code: 'custom',
+        path: ['metadata'],
+        message: parsed.error.issues[0]?.message ?? '面试反馈信息不完整',
+      });
+    }
+  } else if (body.event_type === 'offer_details') {
+    const parsed = offerDetailsMetadataSchema.safeParse(body.metadata ?? {});
+    if (!parsed.success) {
+      context.addIssue({
+        code: 'custom',
+        path: ['metadata'],
+        message: parsed.error.issues[0]?.message ?? 'Offer 明细无效',
+      });
+    }
+  } else if (body.metadata !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['metadata'],
+      message: '该事件类型不支持附加信息',
     });
   }
 });

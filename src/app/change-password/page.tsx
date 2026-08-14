@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Building2, Lock } from 'lucide-react';
+import { ArrowRight, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { authFetch, clearAuthToken, setAuthToken } from '@/lib/auth-client';
+import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -70,9 +71,7 @@ export default function ChangePasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30 mb-4">
-            <Building2 className="w-8 h-8 text-white" />
-          </div>
+          <BrandLogo className="inline-block w-16 h-16 mb-4 drop-shadow-lg drop-shadow-blue-500/30" />
           <h1 className="text-2xl font-bold text-gray-900">人才决策Agent</h1>
         </div>
 

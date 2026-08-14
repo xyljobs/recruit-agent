@@ -1,8 +1,13 @@
 services:
   app:
+    image: zhipin-agent:local
     build:
       context: .
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
     environment:
+      # 子路径部署（共享域名下的 /zhaopin 等）；为空时根路径部署
+      NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
       # 容器内访问宿主机 Supabase 必须用 host.docker.internal（extra_hosts 已映射到
       # docker0 网关 172.17.0.1，绕开 Docker Desktop 转发链路）；不要复用 .env.local
       # 中的 SUPABASE_URL（那是宿主机视角的 localhost，容器内指向自身会连接失败）。
@@ -41,8 +46,11 @@ services:
       - "host.docker.internal:172.17.0.1"
     restart: unless-stopped
   match-worker:
+    image: zhipin-agent:local
     build:
       context: .
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
     command: ["node", "dist-workers/match-batch-worker.js"]
     environment:
       SUPABASE_URL: ${ZHIPIN_SUPABASE_URL:-http://host.docker.internal:8000}
@@ -57,8 +65,11 @@ services:
       - "host.docker.internal:172.17.0.1"
     restart: unless-stopped
   integration-worker:
+    image: zhipin-agent:local
     build:
       context: .
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
     command: ["node", "dist-workers/integration-outbox-worker.js"]
     environment:
       SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}

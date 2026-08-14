@@ -102,6 +102,7 @@
     <section>
       <h2>4 分钟演示路线</h2>
       <ol>
+        <li><strong>登录与多租户：</strong>登录表单显式选择组织（租户）；登录后在导航栏确认当前组织，可切换到第二演示组织。</li>
         <li><strong>数据源：</strong>展示 <code>rules_only</code> 默认不调用模型，以及租户管理员逐项审批。</li>
         <li><strong>职位与标准：</strong>选择 PLC / 电控演示职位，核对技能、经验和硬性条件。</li>
         <li><strong>候选人短名单：</strong>发起确定性预筛，展开证据、缺失信息和置信度拆解。</li>
@@ -118,6 +119,19 @@
         <div class="card"><strong>执行边界</strong><span class="muted">模型未经部署级与租户级批准就无法工作；外发失败会降级。</span></div>
         <div class="card"><strong>真实结果</strong><span class="muted">看板基于联系、面试和录用事件；零样本显示“待积累”。</span></div>
       </div>
+    </section>
+
+    <section>
+      <h2>多租户与租户级 AI 审批</h2>
+      <div class="notice">
+        系统原生多租户：登录时显式选择组织（租户），数据按组织隔离；同一全局账号（邮箱唯一）可加入多个组织。新建组织由平台侧供给（<code>pnpm admin:bootstrap</code>），租户管理员通过邀请码扩张成员。
+      </div>
+      <ol>
+        <li><strong>登录选组织：</strong>登录表单显式选择组织；账号非该组织有效成员时统一拒绝，不泄露成员关系。</li>
+        <li><strong>组织切换器：</strong>顶部导航栏显示当前组织（租户），切换时重新认证，会话不跨租户复用。</li>
+        <li><strong>逐租户审批：</strong>部署级 <code>AI_EXECUTION_MODE</code> 只是能力上限；每个组织的管理员在各自“数据源”页独立批准，未批准自动降级为纯规则。</li>
+        <li><strong>一人多组织：</strong>已有账号的用户在“团队成员”页接受另一组织的邀请码即可加入，邀请码与登录邮箱绑定。</li>
+      </ol>
     </section>
 
     <section>
@@ -147,6 +161,7 @@
       <h2>演示前自检</h2>
       <table>
         <tbody>
+          <tr><td class="ok">必须</td><td>登录页可选择组织，导航栏组织切换器可切换到第二演示组织（seed 自动创建“杭州卓越际联分公司”）</td></tr>
           <tr><td class="ok">必须</td><td>数据库迁移、管理员首登改密、seed 数据、5000 端口与完整闭环可用</td></tr>
           <tr><td class="ok">必须</td><td><code>ENABLE_BOSS_SEARCH=false</code>，页面、API 和本地脚本均不可运行</td></tr>
           <tr><td class="ok">必须</td><td>不展示真实姓名、联系方式、Cookie、API Key 或管理员 Secret</td></tr>

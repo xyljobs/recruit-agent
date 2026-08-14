@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Briefcase,
@@ -11,6 +11,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -59,7 +60,12 @@ const AUTHORIZATION_SOURCE_LABELS: Record<string, string> = {
   other: '其他可核验渠道',
 };
 
-const EMPTY_CANDIDATE_FORM: CandidateForm = {
+export interface DuplicateCandidateHint {
+  id: string;
+  name: string;
+}
+
+export const EMPTY_CANDIDATE_FORM: CandidateForm = {
   name: '',
   email: '',
   phone: '',
@@ -94,12 +100,43 @@ const EMPTY_CANDIDATE_FORM: CandidateForm = {
   },
 };
 
-export function CandidateFormDialog() {
+export function CandidateFormDialog({
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  initialValues,
+  duplicates,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialValues?: CandidateForm | null;
+  duplicates?: DuplicateCandidateHint[];
+} = {}) {
   const { reloadCandidates } = useWorkspaceData();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [form, setForm] = useState<CandidateForm>(EMPTY_CANDIDATE_FORM);
   const [skillInput, setSkillInput] = useState('');
   const [locationInput, setLocationInput] = useState('');
+  const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
+
+  // 快捷入库预填：initialValues 变化时重置表单（授权子表单做深合并）
+  useEffect(() => {
+    if (!initialValues) return;
+    setForm({
+      ...EMPTY_CANDIDATE_FORM,
+      ...initialValues,
+      authorization: {
+        ...EMPTY_CANDIDATE_FORM.authorization,
+        ...initialValues.authorization,
+      },
+    });
+  }, [initialValues]);
+
+  // 重复提示切换时重置二次确认
+  useEffect(() => {
+    setDuplicateConfirmed(false);
+  }, [duplicates]);
 
   function addSkill() {
     const skill = skillInput.trim();
@@ -123,6 +160,10 @@ export function CandidateFormDialog() {
   async function handleSubmit() {
     if (!form.name.trim()) {
       toast.error('请填写候选人姓名');
+      return;
+    }
+    if (duplicates && duplicates.length > 0 && !duplicateConfirmed) {
+      toast.error('请先勾选确认：该候选人可能与库中已有记录重复');
       return;
     }
     const authorization = form.authorization;
@@ -191,6 +232,7 @@ export function CandidateFormDialog() {
       if (result.success) {
         setOpen(false);
         setForm(EMPTY_CANDIDATE_FORM);
+        setDuplicateConfirmed(false);
         await reloadCandidates();
         toast.success('候选人添加成功！');
       } else {
@@ -215,6 +257,35 @@ export function CandidateFormDialog() {
           <DialogTitle>添加候选人</DialogTitle>
           <DialogDescription>录入候选人基本信息</DialogDescription>
         </DialogHeader>
+        {duplicates && duplicates.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>该候选人可能已存在</AlertTitle>
+            <AlertDescription className="space-y-2">
+              <p>
+                检测到库中已有记录：{duplicates.map((item) => item.name).join('、')}
+                。请核对后决定是否继续保存。
+              </p>
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  id="duplicate_confirmed"
+                  checked={duplicateConfirmed}
+                  onChange={(event) =>
+                    setDuplicateConfirmed(event.target.checked)
+                  }
+                  className="mt-1 rounded"
+                />
+                <label
+                  htmlFor="duplicate_confirmed"
+                  className="text-sm font-normal leading-5"
+                >
+                  我已核对，确认需要继续保存该候选人
+                </label>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-2 gap-4">
             <div>

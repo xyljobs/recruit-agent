@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getTenantRequestContext } from '@/lib/auth-server';
-import { SMALL_JSON_BODY_LIMIT, parseLimitedJson } from '@/lib/api-limits';
+import { JD_JSON_BODY_LIMIT, MAX_JD_LENGTH, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
-import { rpcErrorToRequestError } from '@/lib/recruiting/api-contracts';
 import { screeningRubricSchema } from '@/lib/matching/screening-rubric';
+import { rpcErrorToRequestError } from '@/lib/recruiting/api-contracts';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({
@@ -16,7 +16,10 @@ const bodySchema = z.discriminatedUnion('action', [
     experience_required: z.string().trim().max(1000).optional(),
     education_required: z.string().trim().max(100).optional(),
     skills_required: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    bonus_skills: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
     responsibilities: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+    benefits: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    raw_jd: z.string().trim().min(1).max(MAX_JD_LENGTH).optional(),
     screening_rubric: screeningRubricSchema.optional(),
   }).strict(),
   z.object({ action: z.enum(['activate', 'close']), job_id: z.string().uuid() }).strict(),
@@ -65,7 +68,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await parseLimitedJson(request, bodySchema, SMALL_JSON_BODY_LIMIT);
+    const body = await parseLimitedJson(request, bodySchema, JD_JSON_BODY_LIMIT);
     const { supabase, user } = await getTenantRequestContext(request);
     if (body.action !== 'create') {
       const { data, error } = await supabase.rpc('set_job_lifecycle', {
@@ -105,8 +108,11 @@ export async function POST(request: NextRequest) {
         experience_required: body.experience_required ?? null,
         education_required: body.education_required ?? null,
         skills_required: body.skills_required,
+        bonus_skills: body.bonus_skills,
         responsibilities: body.responsibilities,
-        screening_rubric: body.screening_rubric ?? {},
+        benefits: body.benefits,
+        raw_jd: body.raw_jd ?? null,
+        ...(body.screening_rubric ? { screening_rubric: body.screening_rubric } : {}),
         completeness: Math.round((completedFields / 6) * 100),
         missing_fields: missingFields,
         status: 'draft',

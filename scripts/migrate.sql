@@ -346,11 +346,20 @@ BEGIN
       WHEN 'match:single' THEN 10
       WHEN 'dashboard:read' THEN 120
       WHEN 'outcomes:create' THEN 30
+      WHEN 'outcomes:read' THEN 120
       WHEN 'communication-briefs:create' THEN 20
       WHEN 'shortlists:create' THEN 10
       WHEN 'shortlists:read' THEN 120
       WHEN 'shortlists:qualify' THEN 10
       WHEN 'shortlists:decision' THEN 30
+      WHEN 'candidates:extract' THEN 10
+      WHEN 'outreach:read' THEN 120
+      WHEN 'outreach:create' THEN 30
+      WHEN 'outreach:update' THEN 60
+      WHEN 'talent-pool:read' THEN 120
+      WHEN 'job-postings:read' THEN 120
+      WHEN 'job-postings:create' THEN 30
+      WHEN 'today-todos:read' THEN 120
     END,
     CASE p_scope
       WHEN 'candidates:list' THEN 60
@@ -363,11 +372,20 @@ BEGIN
       WHEN 'match:single' THEN 60
       WHEN 'dashboard:read' THEN 60
       WHEN 'outcomes:create' THEN 60
+      WHEN 'outcomes:read' THEN 60
       WHEN 'communication-briefs:create' THEN 60
       WHEN 'shortlists:create' THEN 60
       WHEN 'shortlists:read' THEN 60
       WHEN 'shortlists:qualify' THEN 60
       WHEN 'shortlists:decision' THEN 60
+      WHEN 'candidates:extract' THEN 300
+      WHEN 'outreach:read' THEN 60
+      WHEN 'outreach:create' THEN 60
+      WHEN 'outreach:update' THEN 60
+      WHEN 'talent-pool:read' THEN 60
+      WHEN 'job-postings:read' THEN 60
+      WHEN 'job-postings:create' THEN 60
+      WHEN 'today-todos:read' THEN 60
     END
   INTO v_limit, v_window_seconds;
 
@@ -959,13 +977,14 @@ CREATE TABLE IF NOT EXISTS organization_members (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS organization_members_user_unique ON organization_members(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS organization_members_user_org_unique
+  ON organization_members(user_id, organization_id);
 CREATE INDEX IF NOT EXISTS organization_members_organization_idx ON organization_members(organization_id);
 
 INSERT INTO organization_members (organization_id, user_id, role)
 SELECT organization_id, id, role
 FROM users
-ON CONFLICT (user_id) DO NOTHING;
+ON CONFLICT (organization_id, user_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS resume_batch_settings (
   organization_id VARCHAR(36) PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
@@ -2546,7 +2565,8 @@ CREATE TABLE IF NOT EXISTS recruiting_outcome_events (
   CONSTRAINT recruiting_outcome_events_type_check
     CHECK (event_type IN (
       'outreach_sent', 'candidate_replied', 'interview_scheduled',
-      'interview_completed', 'qualified_interview', 'offer', 'hired',
+      'interview_completed', 'qualified_interview', 'interview_feedback',
+      'offer', 'offer_details', 'hired',
       'rejected', 'withdrawn', 'complaint', 'stage_corrected'
     )),
   CONSTRAINT recruiting_outcome_events_source_check
@@ -2576,6 +2596,57 @@ CREATE INDEX IF NOT EXISTS recruiting_outcome_events_metrics_idx
   ON recruiting_outcome_events(organization_id, occurred_at);
 CREATE INDEX IF NOT EXISTS recruiting_outcome_events_subject_job_idx
   ON recruiting_outcome_events(organization_id, analytics_subject_id, job_id_snapshot);
+
+-- P1-3：面试反馈 / Offer 明细两类轻量事件（不推进招聘阶段）
+ALTER TABLE recruiting_outcome_events DROP CONSTRAINT IF EXISTS recruiting_outcome_events_type_check;
+ALTER TABLE recruiting_outcome_events ADD CONSTRAINT recruiting_outcome_events_type_check
+  CHECK (event_type IN (
+    'outreach_sent', 'candidate_replied', 'interview_scheduled',
+    'interview_completed', 'qualified_interview', 'interview_feedback',
+    'offer', 'offer_details', 'hired',
+    'rejected', 'withdrawn', 'complaint', 'stage_corrected'
+  ));
+
+-- ============================================
+-- 触达待办队列（短名单决策 accepted 后自动生成；供人才池再激活手动创建）
+-- ============================================
+CREATE TABLE IF NOT EXISTS outreach_tasks (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  job_id VARCHAR(36) NOT NULL REFERENCES job_requirements(id) ON DELETE CASCADE,
+  candidate_id VARCHAR(36) NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+  match_record_id VARCHAR(36) REFERENCES match_records(id) ON DELETE SET NULL,
+  shortlist_entry_id VARCHAR(36) REFERENCES shortlist_entries(id) ON DELETE SET NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  due_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  script_snapshot TEXT,
+  note TEXT,
+  created_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT outreach_tasks_status_check
+    CHECK (status IN ('pending', 'contacted', 'replied', 'no_response', 'closed'))
+);
+
+CREATE INDEX IF NOT EXISTS outreach_tasks_org_status_due_idx
+  ON outreach_tasks(organization_id, status, due_at);
+CREATE INDEX IF NOT EXISTS outreach_tasks_org_job_candidate_idx
+  ON outreach_tasks(organization_id, job_id, candidate_id);
+
+CREATE TABLE IF NOT EXISTS job_postings (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  job_id VARCHAR(36) NOT NULL REFERENCES job_requirements(id) ON DELETE CASCADE,
+  platform VARCHAR(50) NOT NULL,
+  url TEXT,
+  note TEXT,
+  posted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  created_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS job_postings_org_job_posted_idx
+  ON job_postings(organization_id, job_id, posted_at);
 
 CREATE TABLE IF NOT EXISTS candidate_rights_requests (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2735,7 +2806,9 @@ BEGIN
     'communication_briefs',
     'integration_outbox',
     'scoring_weight_versions',
-    'calibration_proposals'
+    'calibration_proposals',
+    'outreach_tasks',
+    'job_postings'
   ]
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
@@ -2761,7 +2834,9 @@ REVOKE ALL ON
   communication_briefs,
   integration_outbox,
   scoring_weight_versions,
-  calibration_proposals
+  calibration_proposals,
+  outreach_tasks,
+  job_postings
 FROM authenticated;
 
 GRANT SELECT ON
@@ -2774,8 +2849,14 @@ GRANT SELECT ON
   candidate_rights_requests,
   communication_briefs,
   scoring_weight_versions,
-  calibration_proposals
+  calibration_proposals,
+  outreach_tasks,
+  job_postings
 TO authenticated;
+
+-- 触达待办与发布台账由应用层 RLS 客户端直写（写入仍受各自策略约束）
+GRANT INSERT, UPDATE ON outreach_tasks TO authenticated;
+GRANT INSERT ON job_postings TO authenticated;
 
 GRANT SELECT (
   id, organization_id, name, connector_type, status, capabilities,
@@ -2801,7 +2882,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   communication_briefs,
   integration_outbox,
   scoring_weight_versions,
-  calibration_proposals
+  calibration_proposals,
+  outreach_tasks,
+  job_postings
 TO service_role;
 
 -- ============================================
@@ -3245,6 +3328,10 @@ BEGIN
 END;
 $$;
 
+-- P1-3 面试/Offer 轻量记录：新增 p_metadata 参数（JSONB）。
+-- 旧 9 参数签名废弃删除，防止调用方绕过 metadata 写入。
+DROP FUNCTION IF EXISTS record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR);
+
 CREATE OR REPLACE FUNCTION record_recruiting_outcome(
   p_match_record_id VARCHAR,
   p_event_type VARCHAR,
@@ -3254,7 +3341,8 @@ CREATE OR REPLACE FUNCTION record_recruiting_outcome(
   p_reason_code VARCHAR DEFAULT NULL,
   p_note TEXT DEFAULT NULL,
   p_target_stage VARCHAR DEFAULT NULL,
-  p_supersedes_event_id VARCHAR DEFAULT NULL
+  p_supersedes_event_id VARCHAR DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::JSONB
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -3287,9 +3375,13 @@ BEGIN
   IF p_client_event_id IS NULL OR trim(p_client_event_id) = '' THEN
     RAISE EXCEPTION 'client event id is required' USING ERRCODE = '22023';
   END IF;
+  IF jsonb_typeof(COALESCE(p_metadata, '{}'::JSONB)) <> 'object' THEN
+    RAISE EXCEPTION 'metadata must be a JSON object' USING ERRCODE = '22023';
+  END IF;
   IF p_event_type NOT IN (
     'outreach_sent', 'candidate_replied', 'interview_scheduled',
-    'interview_completed', 'qualified_interview', 'offer', 'hired',
+    'interview_completed', 'qualified_interview', 'interview_feedback',
+    'offer', 'offer_details', 'hired',
     'rejected', 'withdrawn', 'complaint', 'stage_corrected'
   ) THEN
     RAISE EXCEPTION 'invalid recruiting outcome event' USING ERRCODE = '22023';
@@ -3322,7 +3414,8 @@ BEGIN
       OR v_existing.reason_code IS DISTINCT FROM NULLIF(p_reason_code, '')
       OR v_existing.note IS DISTINCT FROM NULLIF(p_note, '')
       OR v_existing.target_stage IS DISTINCT FROM (CASE WHEN p_event_type = 'stage_corrected' THEN p_target_stage ELSE NULL END)
-      OR v_existing.supersedes_event_id IS DISTINCT FROM (CASE WHEN p_event_type = 'stage_corrected' THEN p_supersedes_event_id ELSE NULL END) THEN
+      OR v_existing.supersedes_event_id IS DISTINCT FROM (CASE WHEN p_event_type = 'stage_corrected' THEN p_supersedes_event_id ELSE NULL END)
+      OR v_existing.metadata IS DISTINCT FROM COALESCE(p_metadata, '{}'::JSONB) THEN
       RAISE EXCEPTION 'client event id payload conflict' USING ERRCODE = '23505';
     END IF;
     RETURN jsonb_build_object(
@@ -3381,7 +3474,7 @@ BEGIN
     analytics_subject_id, event_type, target_stage, source,
     client_event_id, supersedes_event_id, reason_code, note,
     recruiter_user_id, recruiter_user_id_snapshot, department_snapshot,
-    job_id_snapshot, job_title_snapshot, occurred_at
+    job_id_snapshot, job_title_snapshot, metadata, occurred_at
   ) VALUES (
     v_organization_id,
     v_match.job_id,
@@ -3400,6 +3493,7 @@ BEGIN
     v_match.job_department,
     v_match.job_id,
     v_match.job_title,
+    COALESCE(p_metadata, '{}'::JSONB),
     COALESCE(p_occurred_at, NOW())
   ) RETURNING * INTO v_event;
 
@@ -3567,14 +3661,14 @@ REVOKE ALL ON FUNCTION create_shortlist_batch(VARCHAR, JSONB, INTEGER, VARCHAR) 
 REVOKE ALL ON FUNCTION finalize_shortlist_run(VARCHAR, VARCHAR, JSONB, INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION record_shortlist_decision(VARCHAR, VARCHAR, VARCHAR, TEXT, VARCHAR, TIMESTAMP WITH TIME ZONE) FROM PUBLIC;
 REVOKE ALL ON FUNCTION qualify_shortlist_run(VARCHAR, VARCHAR) FROM PUBLIC;
-REVOKE ALL ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR) FROM PUBLIC;
+REVOKE ALL ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION append_match_status_event(VARCHAR, VARCHAR, TEXT) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION create_shortlist_batch(VARCHAR, JSONB, INTEGER, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION finalize_shortlist_run(VARCHAR, VARCHAR, JSONB, INTEGER) TO service_role;
 GRANT EXECUTE ON FUNCTION record_shortlist_decision(VARCHAR, VARCHAR, VARCHAR, TEXT, VARCHAR, TIMESTAMP WITH TIME ZONE) TO authenticated;
 GRANT EXECUTE ON FUNCTION qualify_shortlist_run(VARCHAR, VARCHAR) TO authenticated;
-GRANT EXECUTE ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR) TO authenticated;
+GRANT EXECUTE ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, JSONB) TO authenticated;
 
 DO $$
 BEGIN
@@ -3916,6 +4010,9 @@ BEGIN
 END;
 $$;
 
+-- P1-3：同步扩展 metadata 参数；旧 11 参数签名废弃删除。
+DROP FUNCTION IF EXISTS record_recruiting_outcome_with_writeback(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, VARCHAR, VARCHAR);
+
 CREATE OR REPLACE FUNCTION record_recruiting_outcome_with_writeback(
   p_match_record_id VARCHAR,
   p_event_type VARCHAR,
@@ -3927,7 +4024,8 @@ CREATE OR REPLACE FUNCTION record_recruiting_outcome_with_writeback(
   p_target_stage VARCHAR DEFAULT NULL,
   p_supersedes_event_id VARCHAR DEFAULT NULL,
   p_connection_id VARCHAR DEFAULT NULL,
-  p_writeback_client_event_id VARCHAR DEFAULT NULL
+  p_writeback_client_event_id VARCHAR DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::JSONB
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -3945,7 +4043,7 @@ BEGIN
   v_outcome := record_recruiting_outcome(
     p_match_record_id, p_event_type, p_source, p_client_event_id,
     p_occurred_at, p_reason_code, p_note, p_target_stage,
-    p_supersedes_event_id
+    p_supersedes_event_id, p_metadata
   );
   v_writeback := approve_integration_writeback(
     p_connection_id,
@@ -4317,14 +4415,14 @@ $$;
 REVOKE ALL ON FUNCTION import_integration_page(VARCHAR, VARCHAR, JSONB, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION approve_integration_writeback(VARCHAR, VARCHAR, VARCHAR) FROM PUBLIC;
 REVOKE ALL ON FUNCTION manage_integration_writeback(VARCHAR, VARCHAR) FROM PUBLIC;
-REVOKE ALL ON FUNCTION record_recruiting_outcome_with_writeback(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, VARCHAR, VARCHAR) FROM PUBLIC;
+REVOKE ALL ON FUNCTION record_recruiting_outcome_with_writeback(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION record_authorized_ats_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION propose_scoring_calibration(JSONB, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION review_scoring_calibration(VARCHAR, VARCHAR) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION import_integration_page(VARCHAR, VARCHAR, JSONB, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION approve_integration_writeback(VARCHAR, VARCHAR, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION manage_integration_writeback(VARCHAR, VARCHAR) TO authenticated;
-GRANT EXECUTE ON FUNCTION record_recruiting_outcome_with_writeback(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO authenticated;
+GRANT EXECUTE ON FUNCTION record_recruiting_outcome_with_writeback(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, VARCHAR, VARCHAR, JSONB) TO authenticated;
 GRANT EXECUTE ON FUNCTION record_authorized_ats_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION propose_scoring_calibration(JSONB, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION review_scoring_calibration(VARCHAR, VARCHAR) TO authenticated;
@@ -4882,6 +4980,51 @@ CREATE POLICY communication_briefs_tenant_select ON communication_briefs
     )
   );
 
+-- 触达待办：读取与写入同样受候选人授权有效期约束（覆盖租户级基础策略）
+DROP POLICY IF EXISTS outreach_tasks_tenant_select ON outreach_tasks;
+CREATE POLICY outreach_tasks_tenant_select ON outreach_tasks
+  FOR SELECT TO authenticated
+  USING (
+    organization_id = current_organization_id()
+    AND EXISTS (
+      SELECT 1 FROM authorization_records AS authorization_record
+      WHERE authorization_record.organization_id = outreach_tasks.organization_id
+        AND authorization_record.candidate_id = outreach_tasks.candidate_id
+        AND authorization_record.is_active = true
+        AND authorization_record.evidence_status = 'verified'
+        AND authorization_record.authorized_at <= NOW()
+        AND authorization_record.processing_expires_at > NOW()
+    )
+  );
+DROP POLICY IF EXISTS outreach_tasks_tenant_insert ON outreach_tasks;
+CREATE POLICY outreach_tasks_tenant_insert ON outreach_tasks
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    organization_id = current_organization_id()
+    AND EXISTS (
+      SELECT 1 FROM authorization_records AS authorization_record
+      WHERE authorization_record.organization_id = outreach_tasks.organization_id
+        AND authorization_record.candidate_id = outreach_tasks.candidate_id
+        AND authorization_record.is_active = true
+        AND authorization_record.evidence_status = 'verified'
+        AND authorization_record.authorized_at <= NOW()
+        AND authorization_record.processing_expires_at > NOW()
+    )
+  );
+DROP POLICY IF EXISTS outreach_tasks_tenant_update ON outreach_tasks;
+CREATE POLICY outreach_tasks_tenant_update ON outreach_tasks
+  FOR UPDATE TO authenticated
+  USING (organization_id = current_organization_id())
+  WITH CHECK (organization_id = current_organization_id());
+REVOKE DELETE ON outreach_tasks FROM authenticated;
+
+-- 发布台账：租户级读取（租户基础策略已覆盖 SELECT），登记写入限制在本组织
+DROP POLICY IF EXISTS job_postings_tenant_insert ON job_postings;
+CREATE POLICY job_postings_tenant_insert ON job_postings
+  FOR INSERT TO authenticated
+  WITH CHECK (organization_id = current_organization_id());
+REVOKE UPDATE, DELETE ON job_postings FROM authenticated;
+
 CREATE OR REPLACE FUNCTION count_expired_authorization_active_processing(
   p_as_of TIMESTAMP WITH TIME ZONE
 )
@@ -5130,12 +5273,146 @@ REVOKE ALL ON FUNCTION resolve_candidate_rights_request(VARCHAR, VARCHAR, VARCHA
 GRANT EXECUTE ON FUNCTION record_automated_decision_objection(VARCHAR, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION resolve_candidate_rights_request(VARCHAR, VARCHAR, VARCHAR) TO authenticated;
 
+-- ============================================
+-- 多组织成员支持：一个全局账号可加入多个组织（租户）
+-- 租户身份以所选组织的 organization_members 记录为准，
+-- users.organization_id 仅保留为主组织兼容字段
+-- ============================================
+
+-- 解除"一人一组织"限制，改为（用户, 组织）对唯一
+-- （建表处已直接采用该索引定义，此处仅兼容旧环境残留索引）
+DROP INDEX IF EXISTS organization_members_user_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS organization_members_user_org_unique
+  ON organization_members(user_id, organization_id);
+
+-- 会话校验不再要求 users.organization_id 与会话组织一致，
+-- 成员关系已由 organization_members join 保证
+CREATE OR REPLACE FUNCTION validate_auth_session(
+  p_session_id VARCHAR,
+  p_user_id VARCHAR,
+  p_organization_id VARCHAR,
+  p_auth_version INTEGER
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  auth_state JSONB;
+BEGIN
+  SELECT jsonb_build_object(
+    'role', members.role,
+    'email', users.email,
+    'name', users.name,
+    'mustChangePassword', users.must_change_password,
+    'authVersion', users.auth_version
+  )
+  INTO auth_state
+  FROM auth_sessions
+  JOIN users ON users.id = auth_sessions.user_id
+  JOIN organization_members AS members
+    ON members.user_id = users.id
+   AND members.organization_id = auth_sessions.organization_id
+  JOIN organizations ON organizations.id = auth_sessions.organization_id
+  WHERE auth_sessions.id = p_session_id
+    AND auth_sessions.user_id = p_user_id
+    AND auth_sessions.organization_id = p_organization_id
+    AND auth_sessions.auth_version = p_auth_version
+    AND users.auth_version = p_auth_version
+    AND auth_sessions.revoked_at IS NULL
+    AND auth_sessions.expires_at > NOW()
+    AND users.is_active = true
+    AND members.is_active = true
+    AND organizations.is_active = true;
+
+  RETURN auth_state;
+END
+$$;
+
+REVOKE ALL ON FUNCTION validate_auth_session(VARCHAR, VARCHAR, VARCHAR, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION validate_auth_session(VARCHAR, VARCHAR, VARCHAR, INTEGER) TO service_role;
+
+-- 已注册用户凭邀请码加入另一组织（不创建新账号）
+CREATE OR REPLACE FUNCTION join_organization_by_invitation(
+  p_token_hash VARCHAR,
+  p_user_id VARCHAR
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  invitation organization_invitations%ROWTYPE;
+  target_user users%ROWTYPE;
+  target_organization organizations%ROWTYPE;
+BEGIN
+  SELECT * INTO target_user FROM users WHERE id = p_user_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user not found';
+  END IF;
+
+  SELECT *
+  INTO invitation
+  FROM organization_invitations
+  WHERE token_hash = p_token_hash
+    AND accepted_at IS NULL
+    AND expires_at > NOW()
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'invitation invalid, expired, or already used';
+  END IF;
+
+  -- 邀请码与受邀邮箱绑定，禁止拿他人邀请码加入
+  IF lower(invitation.email) <> lower(target_user.email) THEN
+    RAISE EXCEPTION 'invitation email does not match current account';
+  END IF;
+
+  SELECT *
+  INTO target_organization
+  FROM organizations
+  WHERE id = invitation.organization_id
+    AND is_active = true;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'invitation organization is inactive';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM organization_members
+    WHERE user_id = p_user_id
+      AND organization_id = invitation.organization_id
+  ) THEN
+    RAISE EXCEPTION 'already a member of the invitation organization';
+  END IF;
+
+  INSERT INTO organization_members (organization_id, user_id, role)
+  VALUES (invitation.organization_id, p_user_id, invitation.role);
+
+  UPDATE organization_invitations
+  SET accepted_at = NOW()
+  WHERE id = invitation.id;
+
+  RETURN jsonb_build_object(
+    'organization_id', invitation.organization_id,
+    'organization_name', target_organization.name,
+    'role', invitation.role
+  );
+END
+$$;
+
+REVOKE ALL ON FUNCTION join_organization_by_invitation(VARCHAR, VARCHAR) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION join_organization_by_invitation(VARCHAR, VARCHAR) TO service_role;
+
 -- =====================================================================
 -- P1 年限区间口径：职位筛选 rubric（经验年限区间 + 能力优先级 + 加分封顶）
 -- =====================================================================
 ALTER TABLE job_requirements
   ADD COLUMN IF NOT EXISTS screening_rubric JSONB DEFAULT '{}'::jsonb;
 
+-- =====================================================================
 -- P2 公共题库 + 个性化面试提纲
 -- =====================================================================
 
@@ -5496,3 +5773,4 @@ BEGIN
     END;
 END;
 $$;
+

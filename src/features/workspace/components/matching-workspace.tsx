@@ -46,10 +46,16 @@ const MatchRadarChart = dynamic(() => import('./match-radar-chart'), {
   loading: () => <Skeleton className="h-64 w-full" />,
 });
 
-export function MatchingWorkspace() {
+export function MatchingWorkspace({
+  initialJobId = '',
+  initialCandidateId = '',
+}: {
+  initialJobId?: string;
+  initialCandidateId?: string;
+}) {
   const { jobs, candidates, reloadMatchRecords } = useWorkspaceData();
-  const [selectedJobId, setSelectedJobId] = useState('');
-  const [selectedCandidateId, setSelectedCandidateId] = useState('');
+  const [selectedJobId, setSelectedJobId] = useState(initialJobId);
+  const [selectedCandidateId, setSelectedCandidateId] = useState(initialCandidateId);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchResult, setMatchResult] = useState<MatchRecord | null>(null);
 

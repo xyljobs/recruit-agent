@@ -1,23 +1,46 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Mail, Lock, User, ArrowRight, BookOpen, ShieldCheck } from 'lucide-react';
+import { Building2, Mail, Lock, User, BookOpen, ShieldCheck, CircleUserRound } from 'lucide-react';
 import { setAuthToken, authFetch } from '@/lib/auth-client';
-import { BrandLogo } from '@/components/brand-logo';
+import { withBasePath } from '@/lib/base-path';
+
+interface LoginOrganization {
+  slug: string;
+  name: string;
+}
+
+// 表单控件统一样式，对齐 https://hg.skylinktech.com.cn/compliance/ 登录页：
+// 灰底无边框输入框 + 蓝色通栏按钮
+const FIELD_INPUT_CLASS =
+  'h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus-visible:ring-2 focus-visible:ring-[#0D7FFF]/30 focus-visible:border-0';
+const FIELD_SELECT_CLASS =
+  'w-full h-[38px] data-[size=default]:h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus:ring-2 focus:ring-[#0D7FFF]/30';
+const SUBMIT_BUTTON_CLASS =
+  'h-10 w-full rounded-lg bg-[#0D7FFF] text-base font-normal hover:bg-[#005AC2] focus-visible:ring-[#0D7FFF]/40';
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
-  // 本地演示环境：预填管理员账户，便于快速登录
-  const [loginData, setLoginData] = useState({ email: 'admin@drill.local', password: 'Tq7!o_FhbnWIehabmBx3sgSRPMkL' });
+  // 本地演示环境：仅当显式开启 NEXT_PUBLIC_PREFILL_DEMO_LOGIN 时预填管理员账户；
+  // 公网部署不设置该变量，避免把真实凭据暴露给任何访问登录页的人
+  const prefillDemoLogin = process.env.NEXT_PUBLIC_PREFILL_DEMO_LOGIN === 'true';
+  const [loginData, setLoginData] = useState(
+    prefillDemoLogin
+      ? { email: 'admin@drill.local', password: 'Tq7!o_FhbnWIehabmBx3sgSRPMkL', organizationSlug: '' }
+      : { email: '', password: '', organizationSlug: '' },
+  );
+  const [organizations, setOrganizations] = useState<LoginOrganization[]>([]);
+  const [organizationsLoading, setOrganizationsLoading] = useState(true);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
   const [registerData, setRegisterData] = useState({ 
@@ -28,10 +51,42 @@ export default function LoginPage() {
     inviteToken: '',
   });
 
+  // 加载可选组织列表；支持 ?org=<slug> 预选（组织切换器跳转时携带），
+  // 仅一个组织时自动选中，兼容单组织部署的无感体验
+  useEffect(() => {
+    async function loadOrganizations() {
+      try {
+        const response = await authFetch('/api/auth/organizations');
+        const result: { success?: boolean; data?: LoginOrganization[] } = await response.json();
+        const list = result.success ? result.data ?? [] : [];
+        setOrganizations(list);
+        const preselected = new URLSearchParams(window.location.search).get('org')?.trim().toLowerCase() ?? '';
+        setLoginData((current) => {
+          if (preselected && list.some((item) => item.slug === preselected)) {
+            return { ...current, organizationSlug: preselected };
+          }
+          if (!current.organizationSlug && list.length === 1) {
+            return { ...current, organizationSlug: list[0].slug };
+          }
+          return current;
+        });
+      } catch {
+        setOrganizations([]);
+      } finally {
+        setOrganizationsLoading(false);
+      }
+    }
+    void loadOrganizations();
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginData.email || !loginData.password) {
       toast.error('请输入邮箱和密码');
+      return;
+    }
+    if (!loginData.organizationSlug) {
+      toast.error('请选择组织');
       return;
     }
 
@@ -60,7 +115,7 @@ export default function LoginPage() {
         toast.success(passwordChangeRequired ? '请先修改初始密码' : '登录成功！');
         // 立即跳转
         setTimeout(() => {
-          window.location.replace(passwordChangeRequired ? '/change-password' : '/');
+          window.location.replace(withBasePath(passwordChangeRequired ? '/change-password' : '/'));
         }, 300);
       } else {
         toast.error(data.error || '登录失败');
@@ -106,7 +161,7 @@ export default function LoginPage() {
       
       if (data.success) {
         toast.success('注册成功，请登录');
-        setLoginData({ email: registerData.email, password: '' });
+        setLoginData((current) => ({ ...current, email: registerData.email, password: '' }));
         // 切换到登录tab
         setActiveTab('login');
       } else {
@@ -120,20 +175,30 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <BrandLogo className="inline-block w-16 h-16 mb-4 drop-shadow-lg drop-shadow-blue-500/30" />
-          <h1 className="text-2xl font-bold text-gray-900">人才决策Agent</h1>
-          <p className="text-gray-500 mt-1">AI驱动的人才智能匹配系统</p>
-        </div>
-
-        {/* 登录/注册卡片 */}
-        <Card className="shadow-xl border-0">
+    <div
+      className="relative min-h-screen flex items-center justify-center p-4"
+      style={{
+        backgroundImage: `url(${withBasePath('/login-background.jpg')})`,
+        backgroundSize: 'cover',
+        backgroundPosition: '50% 50%',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
+      <div className="relative w-full max-w-[420px]">
+        {/* 登录/注册卡片，样式参照合规站登录页：半透明白底板 + 圆角 + 深阴影 */}
+        <Card className="border-0 rounded-xl bg-white/95 px-2 py-8 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
+          <div className="text-center">
+            <h1 className="flex items-center justify-center gap-2.5 text-[2rem] font-semibold leading-tight text-[#31333F]">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0D7FFF]">
+                <CircleUserRound className="h-7 w-7 text-white" />
+              </span>
+              人才决策Agent
+            </h1>
+            <p className="mt-1 text-base text-[#666]">AI驱动的人才智能匹配系统</p>
+          </div>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <CardHeader className="pb-0">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-2 bg-[#F0F2F6]">
                 <TabsTrigger value="login">登录</TabsTrigger>
                 <TabsTrigger value="register">受邀注册</TabsTrigger>
               </TabsList>
@@ -144,6 +209,33 @@ export default function LoginPage() {
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
+                    <Label htmlFor="login-organization">组织</Label>
+                    <div className="relative">
+                      <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10" />
+                      <Select
+                        value={loginData.organizationSlug || undefined}
+                        onValueChange={(value) => {
+                          setLoginData({ ...loginData, organizationSlug: value });
+                          setMfaRequired(false);
+                          setMfaCode('');
+                        }}
+                        disabled={organizationsLoading}
+                      >
+                        <SelectTrigger id="login-organization" className={`pl-10 ${FIELD_SELECT_CLASS}`}>
+                          <SelectValue placeholder={organizationsLoading ? '加载中...' : '请选择所属组织'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {organizations.map((organization) => (
+                            <SelectItem key={organization.slug} value={organization.slug}>
+                              {organization.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="login-email">邮箱</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -151,7 +243,7 @@ export default function LoginPage() {
                         id="login-email"
                         type="email"
                         placeholder="请输入邮箱"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={loginData.email}
                         onChange={(e) => {
                           setLoginData({ ...loginData, email: e.target.value });
@@ -170,7 +262,7 @@ export default function LoginPage() {
                         id="login-password"
                         type="password"
                         placeholder="请输入密码"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={loginData.password}
                         onChange={(e) => {
                           setLoginData({ ...loginData, password: e.target.value });
@@ -192,7 +284,7 @@ export default function LoginPage() {
                           inputMode="numeric"
                           autoComplete="one-time-code"
                           placeholder="6 位验证码或恢复码"
-                          className="pl-10"
+                          className={`pl-10 ${FIELD_INPUT_CLASS}`}
                           value={mfaCode}
                           onChange={(e) => setMfaCode(e.target.value)}
                           autoFocus
@@ -201,14 +293,13 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading ? '验证中...' : mfaRequired ? '验证并登录' : '登录'}
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button type="submit" className={SUBMIT_BUTTON_CLASS} disabled={loading}>
+                    {loading ? '验证中...' : mfaRequired ? '验证并登录' : '登 录'}
                   </Button>
 
                   <div className="text-center pt-2 flex items-center justify-center gap-4">
                     <a
-                      href="/demo-guide.html"
+                      href={withBasePath('/demo-guide.html')}
                       target="_blank"
                       className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
                     >
@@ -216,7 +307,7 @@ export default function LoginPage() {
                       查看演示指南
                     </a>
                     <a
-                      href="/evaluator-manual.html"
+                      href={withBasePath('/evaluator-manual.html')}
                       target="_blank"
                       className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
                     >
@@ -224,6 +315,11 @@ export default function LoginPage() {
                       评审员操作手册
                     </a>
                   </div>
+
+                  {/* 开通账号提示：放在卡片内，避免叠在背景图上看不清 */}
+                  <p className="rounded-md bg-[#F0F2F6] px-3 py-2 text-center text-sm text-[#666]">
+                    如需开通账号请联系组织管理员获取邀请码
+                  </p>
                 </form>
               </TabsContent>
 
@@ -238,7 +334,7 @@ export default function LoginPage() {
                         id="register-name"
                         type="text"
                         placeholder="请输入姓名"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={registerData.name}
                         onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
                       />
@@ -253,7 +349,7 @@ export default function LoginPage() {
                         id="register-email"
                         type="email"
                         placeholder="请输入邮箱"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={registerData.email}
                         onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
                       />
@@ -268,7 +364,7 @@ export default function LoginPage() {
                         id="register-password"
                         type="password"
                         placeholder="至少12位，含大小写、数字和特殊字符"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={registerData.password}
                         onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                       />
@@ -283,7 +379,7 @@ export default function LoginPage() {
                         id="register-confirm"
                         type="password"
                         placeholder="请再次输入密码"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={registerData.confirmPassword}
                         onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
                       />
@@ -299,27 +395,26 @@ export default function LoginPage() {
                         type="text"
                         autoComplete="one-time-code"
                         placeholder="请输入组织管理员提供的邀请码"
-                        className="pl-10"
+                        className={`pl-10 ${FIELD_INPUT_CLASS}`}
                         value={registerData.inviteToken}
                         onChange={(e) => setRegisterData({ ...registerData, inviteToken: e.target.value })}
                       />
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading ? '注册中...' : '注册'}
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button type="submit" className={SUBMIT_BUTTON_CLASS} disabled={loading}>
+                    {loading ? '注册中...' : '注 册'}
                   </Button>
                 </form>
               </TabsContent>
             </CardContent>
           </Tabs>
         </Card>
+      </div>
 
-        {/* 底部信息 */}
-        <p className="text-center text-sm text-gray-400 mt-6">
-          人才决策Agent · AI驱动的人才智能匹配系统
-        </p>
+      {/* 贴底 footer，样式与 https://hg.skylinktech.com.cn/compliance/ 保持一致 */}
+      <div className="fixed bottom-0 left-0 right-0 text-center py-2 text-xs text-[#999] bg-white/80">
+        © 卓越际联科技有限公司&nbsp;&nbsp;SINCE 2026
       </div>
     </div>
   );

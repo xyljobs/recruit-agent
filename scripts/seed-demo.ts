@@ -351,6 +351,74 @@ async function seedDemoData() {
     throw new Error('未找到可用组织管理员，请先执行 pnpm admin:bootstrap');
   }
 
+  // 0. 幂等准备演示组织（主组织更名“卓越际联总部”，第二组织“杭州卓越际联分公司”）：让评审员体验登录选组织、导航栏切换与多租户隔离
+  console.log('0. 准备演示组织...');
+  const PRIMARY_ORG_SLUG = 'drill';
+  const PRIMARY_ORG_NAME = '卓越际联总部';
+  const SECOND_ORG_NAME = '杭州卓越际联分公司';
+  const SECOND_ORG_SLUG = 'lanwan-precision';
+
+  // 主演示组织 slug 固定为 drill，仅校准展示名称
+  const { data: primaryOrg } = await supabase
+    .from('organizations')
+    .select('id, name')
+    .eq('slug', PRIMARY_ORG_SLUG)
+    .maybeSingle();
+  if (primaryOrg && primaryOrg.name !== PRIMARY_ORG_NAME) {
+    const { error: renamePrimaryError } = await supabase
+      .from('organizations')
+      .update({ name: PRIMARY_ORG_NAME })
+      .eq('id', primaryOrg.id);
+    if (renamePrimaryError) {
+      throw new Error(`主演示组织更名失败: ${renamePrimaryError.message}`);
+    }
+    console.log(`  ✅ 主演示组织已更名为“${PRIMARY_ORG_NAME}”`);
+  }
+
+  const { data: existingSecondOrg } = await supabase
+    .from('organizations')
+    .select('id, name')
+    .eq('slug', SECOND_ORG_SLUG)
+    .maybeSingle();
+  let secondOrganizationId: string;
+  if (existingSecondOrg?.id) {
+    secondOrganizationId = existingSecondOrg.id;
+    if (existingSecondOrg.name !== SECOND_ORG_NAME) {
+      const { error: renameSecondError } = await supabase
+        .from('organizations')
+        .update({ name: SECOND_ORG_NAME })
+        .eq('id', secondOrganizationId);
+      if (renameSecondError) {
+        throw new Error(`第二演示组织更名失败: ${renameSecondError.message}`);
+      }
+      console.log(`  ✅ 第二演示组织已更名为“${SECOND_ORG_NAME}”`);
+    } else {
+      console.log(`  ⏩ “${SECOND_ORG_NAME}”已存在，跳过`);
+    }
+  } else {
+    const { data: createdOrg, error: createOrgError } = await supabase
+      .from('organizations')
+      .insert({ name: SECOND_ORG_NAME, slug: SECOND_ORG_SLUG })
+      .select('id')
+      .single();
+    if (createOrgError || !createdOrg) {
+      throw new Error(`创建第二演示组织失败: ${createOrgError?.message ?? '未知错误'}`);
+    }
+    secondOrganizationId = createdOrg.id;
+    console.log(`  ✅ 已创建“${SECOND_ORG_NAME}”（slug: ${SECOND_ORG_SLUG}）`);
+  }
+
+  // 将演示管理员同时加入第二组织，登录后即可在导航栏切换组织
+  const { error: secondMembershipError } = await supabase
+    .from('organization_members')
+    .upsert(
+      { organization_id: secondOrganizationId, user_id: collectorUserId, role: 'admin', is_active: true },
+      { onConflict: 'user_id,organization_id', ignoreDuplicates: true },
+    );
+  if (secondMembershipError) {
+    throw new Error(`将演示管理员加入第二组织失败: ${secondMembershipError.message}（请确认已执行最新 migrate.sql，解除一人一组织限制）`);
+  }
+
   // 1. 插入候选人数据 + 授权记录
   console.log('\n1. 插入候选人数据...');
   let candidatesInserted = 0;
@@ -457,10 +525,36 @@ async function seedDemoData() {
   }
   console.log(`共插入 ${candidatesInserted} 位候选人`);
 
-  // 2. 插入职位数据
+  // 2. 插入职位数据（历史职位缺少职位描述时回填 raw_jd）
   console.log('\n2. 插入职位数据...');
   let jobsInserted = 0;
+  let jobsBackfilled = 0;
   for (const job of demoJobs) {
+    const { data: existingJob } = await supabase
+      .from('job_requirements')
+      .select('id, raw_jd')
+      .eq('organization_id', organizationId)
+      .eq('title', job.title)
+      .maybeSingle();
+
+    if (existingJob) {
+      if (!existingJob.raw_jd) {
+        const { error: updateError } = await supabase
+          .from('job_requirements')
+          .update({ raw_jd: job.raw_jd, updated_at: new Date().toISOString() })
+          .eq('id', existingJob.id);
+        if (updateError) {
+          console.log(`  ❌ ${job.title}: 回填职位描述失败: ${updateError.message}`);
+        } else {
+          jobsBackfilled++;
+          console.log(`  🔄 ${job.title} 已存在，回填职位描述`);
+        }
+      } else {
+        console.log(`  ⏩ ${job.title} 已存在且已有职位描述，跳过`);
+      }
+      continue;
+    }
+
     const { error } = await supabase
       .from('job_requirements')
       .insert({
@@ -478,7 +572,7 @@ async function seedDemoData() {
       console.log(`  ❌ ${job.title}: ${error.message}`);
     }
   }
-  console.log(`共插入 ${jobsInserted} 个职位`);
+  console.log(`共插入 ${jobsInserted} 个职位，回填 ${jobsBackfilled} 个历史职位的职位描述`);
 
   // 3. 统计结果
   console.log('\n========================================');

@@ -8,7 +8,9 @@ export interface RateLimitPolicy {
 
 export const RATE_LIMITS = {
   candidateList: { scope: 'candidates:list' },
+  candidateExtract: { scope: 'candidates:extract' },
   jdParse: { scope: 'jd:parse' },
+  jdGenerate: { scope: 'jd:generate' },
   interviewGuide: { scope: 'interview:guide' },
   interviewBankRead: { scope: 'interview:bank:read' },
   interviewBankWrite: { scope: 'interview:bank:write' },
@@ -17,6 +19,14 @@ export const RATE_LIMITS = {
   batchMatchSubmit: { scope: 'match:batch:submit' },
   batchMatchStatus: { scope: 'match:batch:status' },
   dashboard: { scope: 'dashboard:read' },
+  outcomesRead: { scope: 'outcomes:read' },
+  outreachList: { scope: 'outreach:read' },
+  outreachCreate: { scope: 'outreach:create' },
+  outreachUpdate: { scope: 'outreach:update' },
+  talentPoolRead: { scope: 'talent-pool:read' },
+  jobPostingsRead: { scope: 'job-postings:read' },
+  jobPostingsCreate: { scope: 'job-postings:create' },
+  todayTodosRead: { scope: 'today-todos:read' },
 } satisfies Record<string, RateLimitPolicy>;
 
 const rateLimitResultSchema = z.object({

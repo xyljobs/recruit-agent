@@ -13,6 +13,7 @@ import {
   Target,
   TrendingUp,
   User,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +29,11 @@ const NAV_ITEMS = [
   { href: '/shortlists', label: '候选人短名单', icon: BriefcaseBusiness },
   { href: '/outcomes', label: '沟通与结果', icon: MessageSquareText },
   { href: '/data-sources', label: '数据源', icon: Database },
+] as const;
+
+// 仅管理员可见的导航项
+const ADMIN_NAV_ITEMS = [
+  { href: '/team', label: '团队成员', icon: Users },
 ] as const;
 
 export function WorkspaceShell({ children }: { children: ReactNode }) {
@@ -85,7 +91,8 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   return (
     <WorkspaceDataProvider>
       <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b sticky top-0 z-50 shadow-sm">
+        <div className="sticky top-0 z-50 bg-white shadow-sm">
+        <header className="border-b">
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <Link href="/analytics" className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
@@ -137,13 +144,12 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="max-w-7xl mx-auto px-4 py-6">
-          <nav
-            aria-label="业务工作区"
-            className="mb-6 overflow-x-auto rounded-lg bg-white p-1 shadow-sm"
-          >
-            <div className="flex min-w-max gap-1">
-              {NAV_ITEMS.map((item) => {
+        <nav
+          aria-label="业务工作区"
+          className="max-w-7xl mx-auto overflow-x-auto px-4 py-2.5"
+        >
+          <div className="flex min-w-max gap-1 rounded-lg bg-gray-50 p-1">
+              {[...NAV_ITEMS, ...(user.role === 'admin' ? ADMIN_NAV_ITEMS : [])].map((item) => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;
                 return (
@@ -166,7 +172,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               })}
             </div>
           </nav>
+        </div>
 
+        <main className="max-w-7xl mx-auto px-4 py-6">
           {children}
         </main>
       </div>

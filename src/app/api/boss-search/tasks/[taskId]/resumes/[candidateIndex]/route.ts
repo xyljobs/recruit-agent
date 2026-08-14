@@ -8,6 +8,7 @@ import {
   getManifestCandidate,
   resolveBossTaskFile,
 } from '@/lib/boss-search-task-files';
+import { maskCandidateName, maskResumeText } from '@/lib/resume-masking';
 
 export const runtime = 'nodejs';
 
@@ -78,12 +79,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const filePath = await resolveBossTaskFile(task.task_dir as string, segments);
     const text = await readFile(filePath, 'utf-8');
-    const name = candidate.name || `候选人 ${candidateIndex}`;
+    // 简历全文统一脱敏输出：姓名/公司按 manifest 标识符遮蔽，电话/邮箱/证件号正则识别。
+    const maskedText = maskResumeText(text, {
+      names: [candidate.name],
+      companies: [candidate.company_title],
+    });
+    const name = maskCandidateName(candidate.name) || `候选人 ${candidateIndex}`;
     const format = new URL(request.url).searchParams.get('format');
     if (format === 'json') {
       return NextResponse.json({
         success: true,
-        data: { name, text, characters: text.length },
+        data: { name, text: maskedText, characters: maskedText.length },
       }, {
         headers: { 'Cache-Control': 'private, no-store' },
       });
@@ -91,7 +97,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const download = new URL(request.url).searchParams.get('download') === '1';
     const filename = `${name}-结构化简历.html`;
-    return new NextResponse(renderResumeHtml(name, text), {
+    return new NextResponse(renderResumeHtml(name, maskedText), {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Disposition': getContentDisposition(download ? 'attachment' : 'inline', filename),

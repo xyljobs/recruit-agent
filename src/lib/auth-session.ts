@@ -4,6 +4,10 @@ import { getJwtSecretKey, getSupabaseJwtSecretKey } from '@/lib/security';
 export const AUTH_SESSION_VERSION = 2;
 export const AUTH_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
+// 会话校验 RPC 的超时上限：网络故障时必须快速失败（返回 401 跳登录页），
+// 而不是让客户端请求无限挂起导致页面卡在加载中。
+const AUTH_SESSION_VALIDATION_TIMEOUT_MS = 10_000;
+
 interface AuthSessionUser {
   id: string;
   email: string;
@@ -96,6 +100,7 @@ export async function verifyCurrentAuthSession(token: string): Promise<CurrentAu
       p_auth_version: authVersion,
     }),
     cache: 'no-store',
+    signal: AbortSignal.timeout(AUTH_SESSION_VALIDATION_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error('认证状态校验失败');

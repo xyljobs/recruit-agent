@@ -10,6 +10,7 @@ import {
   getManifestCandidates,
   resolveBossTaskFile,
 } from '@/lib/boss-search-task-files';
+import { maskCandidateName } from '@/lib/resume-masking';
 
 export const runtime = 'nodejs';
 
@@ -78,6 +79,7 @@ async function renderCandidate(
 ): Promise<string> {
   const index = candidate.global_index ?? fallbackIndex;
   const summaryLines = getSummaryLines(candidate);
+  const maskedName = maskCandidateName(candidate.name) || `候选人 ${index}`;
   const imageData = await Promise.all(getCandidateScreenshotSegments(candidate).map(async segments => {
     try {
       const filePath = await resolveBossTaskFile(taskDir, segments);
@@ -96,7 +98,7 @@ async function renderCandidate(
       <div class="candidate-heading">
         <span class="index">${index}</span>
         <div>
-          <h2>${escapeHtml(candidate.name || `候选人 ${index}`)}</h2>
+          <h2>${escapeHtml(maskedName)}</h2>
           <p>${escapeHtml(candidate.keyword || 'Boss 候选人搜索')}</p>
         </div>
         <span class="count">${images.length} 张简历截图</span>
@@ -105,7 +107,7 @@ async function renderCandidate(
       <details open>
         <summary>查看完整简历截图</summary>
         <div class="screenshots">
-          ${images.map((src, imageIndex) => `<figure><img src="${src}" alt="${escapeHtml(candidate.name || `候选人 ${index}`)}简历第 ${imageIndex + 1} 页"><figcaption>第 ${imageIndex + 1} 页</figcaption></figure>`).join('')}
+          ${images.map((src, imageIndex) => `<figure><img src="${src}" alt="${escapeHtml(maskedName)}简历第 ${imageIndex + 1} 页"><figcaption>第 ${imageIndex + 1} 页</figcaption></figure>`).join('')}
         </div>
       </details>
     </section>`;

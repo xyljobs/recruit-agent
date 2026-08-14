@@ -46,6 +46,7 @@ async function assertBaseline(pool) {
     'integration_outbox',
     'scoring_weight_versions',
     'calibration_proposals',
+    'organization_invitations',
   ];
   const { rows } = await pool.query(
     `SELECT tablename
@@ -87,6 +88,7 @@ async function assertBaseline(pool) {
       'count_expired_authorization_active_processing',
       'update_match_batch_task_from_worker',
       'set_organization_ai_policy',
+      'accept_organization_invitation',
     ]],
   );
   const functions = new Set(functionRows.map(row => row.proname));
@@ -113,6 +115,7 @@ async function assertBaseline(pool) {
     'count_expired_authorization_active_processing',
     'update_match_batch_task_from_worker',
     'set_organization_ai_policy',
+    'accept_organization_invitation',
   ]) {
     if (!functions.has(name)) {
       throw new Error(`migration did not create required function: ${name}`);
@@ -911,6 +914,186 @@ async function assertDecisionCopilotBehavior(pool) {
   }
 }
 
+async function assertInvitationFlow(pool) {
+  const ids = {
+    organization: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    inactiveOrganization: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+    admin: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+    hr: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4',
+  };
+  const inviteeEmail = 'invitee@example.test';
+  const passwordHash = 'bcrypt-placeholder';
+  const hashValid = 'e'.repeat(64);
+  const hashWrongEmail = 'f'.repeat(64);
+  const hashExpired = '1'.repeat(64);
+  const hashInactiveOrg = '2'.repeat(64);
+
+  await pool.query(
+    `INSERT INTO organizations (id, name, slug, is_active, metrics_enabled_at)
+     VALUES ($1, 'Invite Org', 'invite-org', true, NOW()),
+            ($2, 'Inactive Org', 'inactive-org', false, NOW())`,
+    [ids.organization, ids.inactiveOrganization],
+  );
+  await pool.query(
+    `INSERT INTO users (id, organization_id, email, password_hash, name, role)
+     VALUES ($1, $2, 'invite-admin@example.test', 'hash', 'Invite Admin', 'admin'),
+            ($3, $2, 'invite-hr@example.test', 'hash', 'Invite HR', 'hr')`,
+    [ids.admin, ids.organization, ids.hr],
+  );
+  await pool.query(
+    `INSERT INTO organization_invitations (
+       organization_id, email, role, token_hash, invited_by, expires_at
+     ) VALUES
+       ($1, $2, 'hr', $3, $4, NOW() + INTERVAL '7 days'),
+       ($1, 'other@example.test', 'hr', $5, $4, NOW() + INTERVAL '7 days'),
+       ($1, $2, 'hr', $6, $4, NOW() - INTERVAL '1 day'),
+       ($7, $2, 'hr', $8, $4, NOW() + INTERVAL '7 days')`,
+    [
+      ids.organization,
+      inviteeEmail,
+      hashValid,
+      ids.admin,
+      hashWrongEmail,
+      hashExpired,
+      ids.inactiveOrganization,
+      hashInactiveOrg,
+    ],
+  );
+
+  const asService = async (query, params) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL ROLE service_role');
+      const result = await client.query(query, params);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  const acceptInvitation = (hash, email) => asService(
+    `SELECT accept_organization_invitation($1, $2, $3, $4) AS result`,
+    [hash, email, passwordHash, 'Invitee'],
+  );
+
+  const accepted = await acceptInvitation(hashValid, inviteeEmail);
+  const acceptedResult = accepted.rows[0].result;
+  if (acceptedResult.email !== inviteeEmail
+    || acceptedResult.role !== 'hr'
+    || acceptedResult.organization_id !== ids.organization
+    || !acceptedResult.id) {
+    throw new Error(`invitation accept returned unexpected result: ${JSON.stringify(acceptedResult)}`);
+  }
+  const { rows: userRows } = await pool.query(
+    `SELECT role, company FROM users WHERE id = $1`,
+    [acceptedResult.id],
+  );
+  if (userRows[0].role !== 'hr' || userRows[0].company !== 'Invite Org') {
+    throw new Error('accepted invitation did not create the user with invited role and organization name');
+  }
+  const { rows: memberRows } = await pool.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM organization_members
+     WHERE organization_id = $1 AND user_id = $2`,
+    [ids.organization, acceptedResult.id],
+  );
+  if (memberRows[0].count !== 1) {
+    throw new Error('accepted invitation did not create the organization membership');
+  }
+  const { rows: acceptedInviteRows } = await pool.query(
+    `SELECT accepted_at IS NOT NULL AS accepted FROM organization_invitations WHERE token_hash = $1`,
+    [hashValid],
+  );
+  if (!acceptedInviteRows[0].accepted) {
+    throw new Error('accepted invitation was not marked as used');
+  }
+  process.stdout.write('database checkpoint: invitation accept verified\n');
+
+  const expectInvitationRejection = async (attempt, label) => {
+    let caught;
+    try {
+      await attempt();
+    } catch (error) {
+      caught = error;
+    }
+    if (!caught || caught.code !== 'P0001') {
+      throw new Error(`${label} was not rejected with a raise exception`);
+    }
+    if (!/invitation|expired|used/i.test(caught.message)) {
+      throw new Error(`${label} message is not recognized by the register error mapping: ${caught.message}`);
+    }
+  };
+  await expectInvitationRejection(
+    () => acceptInvitation(hashValid, inviteeEmail),
+    'replayed invitation',
+  );
+  await expectInvitationRejection(
+    () => acceptInvitation(hashWrongEmail, inviteeEmail),
+    'wrong email invitation',
+  );
+  await expectInvitationRejection(
+    () => acceptInvitation(hashExpired, inviteeEmail),
+    'expired invitation',
+  );
+  await expectInvitationRejection(
+    () => acceptInvitation(hashInactiveOrg, inviteeEmail),
+    'inactive organization invitation',
+  );
+  const { rows: duplicateRows } = await pool.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM users WHERE email = $1`,
+    [inviteeEmail],
+  );
+  if (duplicateRows[0].count !== 1) {
+    throw new Error('rejected invitation replays created duplicate users');
+  }
+  process.stdout.write('database checkpoint: invitation rejection gates verified\n');
+
+  const claimsAdmin = { organizationId: ids.organization, userId: ids.admin, appRole: 'admin' };
+  const claimsHr = { organizationId: ids.organization, userId: ids.hr, appRole: 'hr' };
+  const visible = await withClaims(pool, claimsAdmin, client => client.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM organization_invitations WHERE organization_id = $1`,
+    [ids.organization],
+  ));
+  if (visible.rows[0].count !== 3) {
+    throw new Error('admin could not list own organization invitations');
+  }
+  const invisible = await withClaims(pool, claimsHr, client => client.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM organization_invitations WHERE organization_id = $1`,
+    [ids.organization],
+  ));
+  if (invisible.rows[0].count !== 0) {
+    throw new Error('RLS exposed invitations to a non-admin member');
+  }
+  // SELECT/DELETE 无匹配策略时静默过滤为 0 行；INSERT 的 WITH CHECK 不满足才抛 42501
+  const deleted = await withClaims(pool, claimsAdmin, client => client.query(
+    `DELETE FROM organization_invitations WHERE token_hash = $1 AND accepted_at IS NULL`,
+    [hashWrongEmail],
+  ));
+  if (deleted.rowCount !== 1) {
+    throw new Error('admin could not revoke a pending invitation');
+  }
+  const hrDeleted = await withClaims(pool, claimsHr, client => client.query(
+    `DELETE FROM organization_invitations WHERE token_hash = $1 AND accepted_at IS NULL`,
+    [hashExpired],
+  ));
+  if (hrDeleted.rowCount !== 0) {
+    throw new Error('non-admin member revoked an invitation');
+  }
+  await expectDatabaseError(
+    () => withClaims(pool, claimsHr, client => client.query(
+      `INSERT INTO organization_invitations (
+         organization_id, email, role, token_hash, invited_by, expires_at
+       ) VALUES ($1, 'sneaky@example.test', 'admin', $2, $3, NOW() + INTERVAL '7 days')`,
+      [ids.organization, '3'.repeat(64), ids.hr],
+    )),
+    '42501',
+  );
+  process.stdout.write('database checkpoint: invitation RLS gates verified\n');
+}
+
 async function main() {
   dockerCompose('up', '-d', '--wait');
   const pool = new Pool({ connectionString });
@@ -921,6 +1104,7 @@ async function main() {
     await pool.query(migration);
     await assertBaseline(pool);
     await assertDecisionCopilotBehavior(pool);
+    await assertInvitationFlow(pool);
     process.stdout.write('database migration, RLS, state, idempotency, integration and cleanup checks passed\n');
   } finally {
     await pool.end();

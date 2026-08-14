@@ -27,6 +27,20 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseServiceClient();
+
+    // 预检邮箱是否已注册，避免受邀人重复注册后才在唯一约束处报错
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (existingUser) {
+      return NextResponse.json(
+        { error: '该邮箱已注册，请直接登录' },
+        { status: 400 },
+      );
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
     const tokenHash = createHash('sha256').update(inviteToken).digest('hex');
     const { data: user, error } = await supabase.rpc(
@@ -40,10 +54,18 @@ export async function POST(request: NextRequest) {
     );
 
     if (error) {
+      // 预检存在竞态窗口，仍可能撞上 users.email 唯一约束，兜底提示
       const invalidInvite = /invitation|邀请|expired|used/i.test(error.message);
+      const duplicateEmail = /duplicate|unique/i.test(error.message);
       return NextResponse.json(
-        { error: invalidInvite ? '邀请码无效、已使用或已过期' : '注册失败，请稍后重试' },
-        { status: invalidInvite ? 400 : 500 },
+        {
+          error: invalidInvite
+            ? '邀请码无效、已使用或已过期'
+            : duplicateEmail
+              ? '该邮箱已注册，请直接登录'
+              : '注册失败，请稍后重试',
+        },
+        { status: invalidInvite || duplicateEmail ? 400 : 500 },
       );
     }
 

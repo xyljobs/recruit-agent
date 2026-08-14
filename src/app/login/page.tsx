@@ -15,7 +15,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
-  const [loginData, setLoginData] = useState({ email: '', password: '' });
+  // 本地演示环境：预填管理员账户，便于快速登录
+  const [loginData, setLoginData] = useState({ email: 'admin@drill.local', password: '123456' });
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
   const [registerData, setRegisterData] = useState({ 

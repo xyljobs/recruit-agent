@@ -8,15 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Building2, Mail, Lock, User, ArrowRight, BookOpen, ShieldCheck } from 'lucide-react';
-import { setAuthToken } from '@/lib/auth-client';
+import { Mail, Lock, User, ArrowRight, BookOpen, ShieldCheck } from 'lucide-react';
+import { setAuthToken, authFetch } from '@/lib/auth-client';
+import { BrandLogo } from '@/components/brand-logo';
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
   // 本地演示环境：预填管理员账户，便于快速登录
-  const [loginData, setLoginData] = useState({ email: 'admin@drill.local', password: '123456' });
+  const [loginData, setLoginData] = useState({ email: 'admin@drill.local', password: 'Tq7!o_FhbnWIehabmBx3sgSRPMkL' });
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
   const [registerData, setRegisterData] = useState({ 
@@ -36,7 +37,7 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await authFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -90,7 +91,7 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await authFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -123,9 +124,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30 mb-4">
-            <Building2 className="w-8 h-8 text-white" />
-          </div>
+          <BrandLogo className="inline-block w-16 h-16 mb-4 drop-shadow-lg drop-shadow-blue-500/30" />
           <h1 className="text-2xl font-bold text-gray-900">人才决策Agent</h1>
           <p className="text-gray-500 mt-1">AI驱动的人才智能匹配系统</p>
         </div>
@@ -207,7 +206,7 @@ export default function LoginPage() {
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
 
-                  <div className="text-center pt-2">
+                  <div className="text-center pt-2 flex items-center justify-center gap-4">
                     <a
                       href="/demo-guide.html"
                       target="_blank"
@@ -215,6 +214,14 @@ export default function LoginPage() {
                     >
                       <BookOpen className="w-4 h-4" />
                       查看演示指南
+                    </a>
+                    <a
+                      href="/evaluator-manual.html"
+                      target="_blank"
+                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      评审员操作手册
                     </a>
                   </div>
                 </form>

@@ -91,6 +91,9 @@ export async function GET(request: NextRequest) {
       pageSize: searchParams.get('pageSize') ?? undefined,
       search: searchParams.get('search') ?? undefined,
       masked: searchParams.get('masked') ?? undefined,
+      jobId: searchParams.get('jobId') ?? undefined,
+      unbound: searchParams.get('unbound') ?? undefined,
+      bound: searchParams.get('bound') ?? undefined,
     });
     if (!queryParams.success) {
       return NextResponse.json(
@@ -98,14 +101,25 @@ export async function GET(request: NextRequest) {
         { status: 400 },
       );
     }
-    const { page, pageSize, search, masked } = queryParams.data;
-    
+    const { page, pageSize, search, masked, jobId, unbound, bound } = queryParams.data;
+
     let query = supabase
       .from('candidates')
       .select('*', { count: 'exact' })
       .eq('organization_id', user.organizationId)
       .order('created_at', { ascending: false })
       .range((page - 1) * pageSize, page * pageSize - 1);
+
+    // 按绑定职位过滤 / 仅看未绑定（资源池视图）/ 仅看已绑定（候选人库视图）；组织隔离已由 organization_id 保证
+    if (jobId) {
+      query = query.eq('source_job_id', jobId);
+    }
+    if (unbound) {
+      query = query.is('source_job_id', null);
+    }
+    if (bound) {
+      query = query.not('source_job_id', 'is', null);
+    }
 
     if (search) {
       // 搜索时：加密字段（name/company/position）不支持数据库层 ilike

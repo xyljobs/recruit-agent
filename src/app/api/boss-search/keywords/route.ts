@@ -58,40 +58,61 @@ export async function POST(request: NextRequest) {
       { role: 'user' as const, content: prompt }
     ];
 
-    let fullResponse = '';
-    const stream = aiGateway.stream(messages, {
-      model: aiGateway.policy.modelName ?? undefined,
+    // 流式输出：NDJSON 逐分片回传，前端渐进展示生成过程
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enqueueLine = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        };
+        enqueueLine({ type: 'start' });
+        let fullResponse = '';
+        try {
+          const chunks = aiGateway.stream(messages, {
+            model: aiGateway.policy.modelName ?? undefined,
+          });
+          for await (const chunk of chunks) {
+            if (!chunk.content) continue;
+            const text = chunk.content.toString();
+            fullResponse += text;
+            enqueueLine({ type: 'delta', text });
+          }
+
+          // Extract JSON from response
+          const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            throw new Error('关键词生成失败，请重试');
+          }
+
+          const result = bossKeywordResultSchema.safeParse(JSON.parse(jsonMatch[0]));
+          if (!result.success) {
+            throw new Error('关键词生成结果超出允许范围，请重试');
+          }
+          const total = result.data.keywords.reduce((sum, keyword) => sum + keyword.count, 0);
+
+          enqueueLine({
+            type: 'done',
+            data: {
+              ...result.data,
+              total,
+            },
+          });
+          controller.close();
+        } catch (streamError) {
+          console.error('关键词生成流式失败:', streamError);
+          enqueueLine({
+            type: 'error',
+            error: streamError instanceof Error ? streamError.message : '关键词生成失败',
+          });
+          controller.close();
+        }
+      },
     });
 
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        fullResponse += chunk.content.toString();
-      }
-    }
-
-    // Extract JSON from response
-    const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { success: false, error: '关键词生成失败，请重试' },
-        { status: 500 }
-      );
-    }
-
-    const result = bossKeywordResultSchema.safeParse(JSON.parse(jsonMatch[0]));
-    if (!result.success) {
-      return NextResponse.json(
-        { success: false, error: '关键词生成结果超出允许范围，请重试' },
-        { status: 502 },
-      );
-    }
-    const total = result.data.keywords.reduce((sum, keyword) => sum + keyword.count, 0);
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        ...result.data,
-        total,
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
       },
     });
   } catch (error) {

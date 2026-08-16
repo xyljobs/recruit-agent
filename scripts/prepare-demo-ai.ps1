@@ -70,4 +70,4 @@ Write-Step "验证 Coding Plan 端点连通性（qwen3.7-plus 最小 chat）"
 $probe = docker exec zhipin_agent-app-1 node -e "const fs=require('fs');const key=fs.readFileSync('/run/secrets/LLM_API_KEY','utf8').trim();fetch(process.env.LLM_BASE_URL+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model:process.env.LLM_MODEL,messages:[{role:'user',content:'ping'}],max_tokens:5})}).then(async r=>{const t=await r.text();console.log(r.status+' '+(t.slice(0,200).replace(/\n/g,' ')))})"
 Write-Host $probe
 
-Write-Step "完成。拍摄前剩余手工项：登录 admin@drill.local + 数据源页租户审批 + 现场走全链路"
+Write-Step "完成。拍摄前剩余手工项：登录 demo@zhaopin.local + 数据源页租户审批 + 现场走全链路"

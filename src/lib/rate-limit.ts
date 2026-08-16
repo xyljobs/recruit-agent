@@ -9,11 +9,13 @@ export interface RateLimitPolicy {
 export const RATE_LIMITS = {
   candidateList: { scope: 'candidates:list' },
   candidateExtract: { scope: 'candidates:extract' },
+  candidateResumeSummary: { scope: 'candidates:resume-summary' },
   jdParse: { scope: 'jd:parse' },
   jdGenerate: { scope: 'jd:generate' },
   jdKeywords: { scope: 'jd:keywords' },
   interviewGuide: { scope: 'interview:guide' },
   interviewGuideRead: { scope: 'interview:guide:read' },
+  interviewGuideWrite: { scope: 'interview:guide:write' },
   interviewBankRead: { scope: 'interview:bank:read' },
   interviewBankWrite: { scope: 'interview:bank:write' },
   bossKeywords: { scope: 'boss:keywords' },

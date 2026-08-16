@@ -80,7 +80,6 @@ export function PipelineWorkspace() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">候选人状态看板</h2>
         <Button
-          variant="outline"
           size="sm"
           onClick={handleExport}
           disabled={exporting}
@@ -97,7 +96,7 @@ export function PipelineWorkspace() {
               (record) => record.status === status,
             );
             return (
-              <Card key={status} className="bg-gray-50">
+              <Card key={status} className="bg-muted/50">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <span className={config.color}>{config.icon}</span>
@@ -111,7 +110,7 @@ export function PipelineWorkspace() {
                   <ScrollArea className="h-64">
                     <div className="space-y-2">
                       {records.map((record) => (
-                        <Card key={record.id} className="bg-white shadow-sm">
+                        <Card key={record.id} className="bg-card shadow-sm">
                           <CardContent className="p-3">
                             <div className="flex items-center justify-between mb-2">
                               <span className="font-medium text-sm">
@@ -123,14 +122,13 @@ export function PipelineWorkspace() {
                                 {record.overall_score}分
                               </span>
                             </div>
-                            <p className="text-xs text-gray-500 mb-2">
+                            <p className="text-xs text-muted-foreground mb-2">
                               {record.job?.title}
                             </p>
                             <div className="flex flex-wrap gap-1">
                               {status === 'pending' && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
                                   className="h-7 text-xs"
                                   onClick={() =>
                                     handleUpdateStatus(record.id, 'contacted')
@@ -142,7 +140,6 @@ export function PipelineWorkspace() {
                               {status === 'contacted' && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
                                   className="h-7 text-xs"
                                   onClick={() =>
                                     handleUpdateStatus(record.id, 'interviewing')
@@ -155,7 +152,6 @@ export function PipelineWorkspace() {
                                 <>
                                   <Button
                                     size="sm"
-                                    variant="outline"
                                     className="h-7 text-xs"
                                     onClick={() =>
                                       handleUpdateStatus(record.id, 'offered')
@@ -165,7 +161,6 @@ export function PipelineWorkspace() {
                                   </Button>
                                   <Button
                                     size="sm"
-                                    variant="outline"
                                     className="h-7 text-xs"
                                     onClick={() =>
                                       handleUpdateStatus(record.id, 'rejected')
@@ -179,7 +174,6 @@ export function PipelineWorkspace() {
                                 <>
                                   <Button
                                     size="sm"
-                                    variant="outline"
                                     className="h-7 text-xs"
                                     onClick={() =>
                                       handleUpdateStatus(record.id, 'hired')
@@ -189,7 +183,6 @@ export function PipelineWorkspace() {
                                   </Button>
                                   <Button
                                     size="sm"
-                                    variant="outline"
                                     className="h-7 text-xs"
                                     onClick={() =>
                                       handleUpdateStatus(record.id, 'rejected')
@@ -224,8 +217,8 @@ export function PipelineWorkspace() {
       ) : (
         <Card>
           <CardContent className="py-12">
-            <div className="text-center text-gray-500">
-              <Kanban className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+            <div className="text-center text-muted-foreground">
+              <Kanban className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
               <p>暂无匹配记录，请先进行智能匹配</p>
             </div>
           </CardContent>

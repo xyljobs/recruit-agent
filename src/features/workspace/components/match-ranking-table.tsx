@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ClipboardList } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,8 @@ interface MatchRankingTableProps {
   entries: ShortlistEntry[];
   onOpenProfile: (candidateId: string) => void;
   onGotoDecision: (entryId: string) => void;
+  /** 行内生成 AI 建议面试问题（弹窗展示完整面试提纲） */
+  onGenerateGuide: (entry: ShortlistEntry) => void;
 }
 
 type SortMode = 'rank' | 'overall' | 'years' | 'confidence';
@@ -88,7 +90,7 @@ function SortableHeadButton({
       onClick={onClick}
       className={cn(
         'inline-flex items-center gap-1 transition-colors hover:text-slate-900',
-        active && 'text-blue-700 hover:text-blue-800',
+        active && 'text-primary hover:text-primary',
       )}
     >
       {label}
@@ -104,6 +106,7 @@ function RankingTable({
   onSortChange,
   onOpenProfile,
   onGotoDecision,
+  onGenerateGuide,
 }: {
   rows: RankingRow[];
   dashRank: boolean;
@@ -111,6 +114,7 @@ function RankingTable({
   onSortChange: (mode: SortMode) => void;
   onOpenProfile: (candidateId: string) => void;
   onGotoDecision: (entryId: string) => void;
+  onGenerateGuide: (entry: ShortlistEntry) => void;
 }) {
   return (
     <Table>
@@ -144,7 +148,7 @@ function RankingTable({
             />
           </TableHead>
           <TableHead className="w-28">人工决策</TableHead>
-          <TableHead className="w-20">操作</TableHead>
+          <TableHead className="w-36">操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -205,8 +209,8 @@ function RankingTable({
                 )}
               </div>
             </TableCell>
-            <TableCell>
-              <p className="max-w-72 truncate text-xs leading-5 text-slate-600" title={row.rationale}>
+            <TableCell className="w-full min-w-0">
+              <p className="whitespace-normal break-words text-xs leading-5 text-slate-600">
                 {row.rationale}
               </p>
             </TableCell>
@@ -219,7 +223,18 @@ function RankingTable({
               <span className="text-sm text-slate-700">{DECISION_LABELS[row.entry.human_decision]}</span>
             </TableCell>
             <TableCell>
-              <Button variant="outline" size="sm" onClick={() => onGotoDecision(row.entry.id)}>去决策</Button>
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" onClick={() => onGotoDecision(row.entry.id)}>去决策</Button>
+                <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/10 hover:text-primary" onClick={() => onOpenProfile(row.entry.candidate_id)}>画像</Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-blue-700 hover:text-blue-900"
+                  onClick={() => onGenerateGuide(row.entry)}
+                >
+                  <ClipboardList className="mr-1 h-3.5 w-3.5" />面试题
+                </Button>
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -228,7 +243,7 @@ function RankingTable({
   );
 }
 
-export function MatchRankingTable({ entries, onOpenProfile, onGotoDecision }: MatchRankingTableProps) {
+export function MatchRankingTable({ entries, onOpenProfile, onGotoDecision, onGenerateGuide }: MatchRankingTableProps) {
   const [sortMode, setSortMode] = useState<SortMode>('rank');
 
   const rows = useMemo(() => {
@@ -272,6 +287,7 @@ export function MatchRankingTable({ entries, onOpenProfile, onGotoDecision }: Ma
     onSortChange: setSortMode,
     onOpenProfile,
     onGotoDecision,
+    onGenerateGuide,
   } as const;
 
   return (
@@ -285,9 +301,9 @@ export function MatchRankingTable({ entries, onOpenProfile, onGotoDecision }: Ma
         {notRecommendedRows.length > 0 && (
           <Collapsible>
             <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full justify-between border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100">
+              <Button variant="secondary" className="w-full justify-between">
                 <span className="inline-flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <AlertCircle className="h-4 w-4 text-destructive" />
                   不建议推进（{notRecommendedRows.length}）
                 </span>
                 <ChevronDown className="h-4 w-4" />

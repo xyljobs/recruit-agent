@@ -9,8 +9,8 @@ interface CandidateRow {
 }
 
 // DELETE /api/candidates/[id] - 条件删除候选人（仅管理员）
-// 仅允许删除尚未产生匹配 / 短名单 / 复盘记录的候选人（如误录入数据）；
-// 已产生决策留痕的候选人拒绝硬删，引导走「撤回授权」（脱敏后保留匿名统计），
+// 仅允许删除尚未产生决策留痕的候选人（如误录入数据；pending 匹配记录随候选人级联清理）；
+// 已产生决策留痕（匹配已推进 / 短名单 / 复盘）的候选人拒绝硬删，引导走「撤回授权」，
 // 避免破坏匹配历史、短名单决策与结果复盘的审计链。
 export async function DELETE(
   request: NextRequest,
@@ -48,7 +48,8 @@ export async function DELETE(
       supabase
         .from('match_records')
         .select('id', { count: 'exact', head: true })
-        .eq('candidate_id', candidateId),
+        .eq('candidate_id', candidateId)
+        .neq('status', 'pending'),
       supabase
         .from('shortlist_entries')
         .select('id', { count: 'exact', head: true })
@@ -71,7 +72,7 @@ export async function DELETE(
         {
           success: false,
           error:
-            `该候选人已产生匹配或决策留痕（匹配 ${matchCount} 条、短名单 ${shortlistCount} 条、复盘事件 ${outcomeCount} 条），` +
+            `该候选人已产生决策留痕（已推进匹配 ${matchCount} 条、短名单 ${shortlistCount} 条、复盘事件 ${outcomeCount} 条），` +
             '为保留审计链不可直接删除，请改用「撤回授权」（个人信息脱敏，统计事实保留）',
         },
         { status: 409 },

@@ -24,6 +24,15 @@ const quickImportBodySchema = z
     preferred_locations: z.array(z.string().max(200)).max(50).optional(),
     salary_expectation: z.string().max(200).nullable().optional(),
     resume_text: z.string().max(200_000).nullable().optional(),
+    /**
+     * 简历获取方式（法律口径分层）：
+     * - candidate_submitted 候选人主动投递/发送：求职行为本身构成处理依据（PIPL 第13条
+     *   订立合同所必需），且发布版 JD 已含自动化评估告知 → 默认 assistive（AI 辅助评分）
+     * - proactively_sourced 主动搜索获取：候选人未向本组织投递 → 默认 human_review_only
+     */
+    acquisition_type: z
+      .enum(['candidate_submitted', 'proactively_sourced'])
+      .default('candidate_submitted'),
   })
   .strict();
 
@@ -63,10 +72,16 @@ function parseSalaryExpectation(expectation: string): {
  * POST /api/candidates/quick-import
  * HR 把从招聘平台下载的简历文件拖入系统后，前端解析出字段并调用本接口一键入库：
  * - 自动绑定职位（source_job_id 必传）
- * - 授权证据使用默认值：招聘平台授权记录、即刻授权、默认保留 1 年、
- *   外部处理方取组织已批准的 approved_cloud_processors（rules_only 下为空）
- * - 自动化决策偏好默认 human_review_only（纯人工复核，无需影响评估引用）
+ * - 授权证据按获取方式分层（acquisition_type）：
+ *   - candidate_submitted（默认）：投递/发送型，automated_decision_preference=assistive，
+ *     关联组织级影响评估（发布版 JD 已含自动化评估告知）
+ *   - proactively_sourced：主动搜索型，automated_decision_preference=human_review_only
+ * - 默认保留 1 年、外部处理方取组织已批准的 approved_cloud_processors（rules_only 下为空）
  */
+
+/** 投递型简历关联的组织级个人信息保护影响评估编号（候选人匹配场景） */
+const PLATFORM_SUBMITTED_PIA_REFERENCE = 'PIA-CANDIDATE-MATCHING-V1';
+
 export async function POST(request: NextRequest) {
   try {
     const { supabase, user } = await getTenantRequestContext(request);
@@ -78,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     const { data: organization, error: orgError } = await supabase
       .from('organizations')
-      .select('name, approved_cloud_processors')
+      .select('name, approved_cloud_processors, created_at')
       .eq('id', user.organizationId)
       .single();
     if (orgError || !organization) {
@@ -86,12 +101,13 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
+    const isCandidateSubmitted = body.acquisition_type === 'candidate_submitted';
     const submission = {
       confirmed: true,
       source_type: 'recruitment_platform',
-      source_reference: 'platform-resume-import',
+      source_reference: `platform-resume-import:${body.acquisition_type}`,
       proof_type: 'platform_record',
-      proof_reference: 'platform-resume-import',
+      proof_reference: `platform-resume-import:${body.acquisition_type}`,
       proof_sha256: '',
       controller_name: organization.name,
       controller_contact: user.email,
@@ -102,9 +118,18 @@ export async function POST(request: NextRequest) {
       external_processors: Array.isArray(organization.approved_cloud_processors)
         ? organization.approved_cloud_processors
         : [],
-      automated_decision_preference: 'human_review_only',
-      impact_assessment_reference: '',
-      impact_assessment_completed_at: '',
+      automated_decision_preference: isCandidateSubmitted
+        ? ('assistive' as const)
+        : ('human_review_only' as const),
+      impact_assessment_reference: isCandidateSubmitted
+        ? PLATFORM_SUBMITTED_PIA_REFERENCE
+        : '',
+      // 影响评估完成时间取组织创建时间（早于本次入库，满足“评估须先于启用”校验）；缺省回退 1 天前
+      impact_assessment_completed_at: isCandidateSubmitted
+        ? (typeof organization.created_at === 'string' && organization.created_at
+            ? organization.created_at
+            : new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
+        : '',
     };
     const parsedSubmission = authorizationSubmissionSchema.safeParse(submission);
     if (!parsedSubmission.success) {

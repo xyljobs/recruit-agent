@@ -1,9 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
-  ArrowLeft,
   CheckCircle2,
   Clock,
   FileText,
@@ -339,39 +337,20 @@ export default function ResumeBatchPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex items-center justify-center py-24">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Link href="/" aria-label="返回人才决策Agent">
-              <Button variant="ghost" size="icon">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-              <FileUp className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-slate-900">简历批处理</h1>
-              <p className="text-xs text-slate-500">PDF 提取 · AI 推荐理由 · 钉钉写回</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-medium">{user?.name}</p>
-            <p className="text-xs text-slate-500">{user?.role === 'admin' ? '管理员' : 'HR'}</p>
-          </div>
-        </div>
-      </header>
+    <>
+      <div className="mb-6">
+        <h1 className="font-semibold text-slate-900">简历批处理</h1>
+        <p className="text-xs text-slate-500">PDF 提取 · AI 推荐理由 · 钉钉写回</p>
+      </div>
 
-      <main className="mx-auto max-w-7xl px-4 py-6">
-        <Tabs defaultValue="batch" className="space-y-6">
+      <Tabs defaultValue="batch" className="space-y-6">
           <TabsList>
             <TabsTrigger value="batch" className="gap-2">
               <FileUp className="h-4 w-4" />
@@ -519,7 +498,7 @@ export default function ResumeBatchPage() {
                       </div>
 
                       <Button
-                        className="w-full bg-blue-600 hover:bg-blue-700"
+                        className="w-full"
                         size="lg"
                         disabled={submitting || files.length === 0 || !sheetUrl.trim()}
                         onClick={submitTask}
@@ -790,7 +769,7 @@ export default function ResumeBatchPage() {
                         </Button>
                         {credentialForm.id && (
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             onClick={() => setCredentialForm({ id: '', name: '', mcpUrl: '' })}
                           >
                             取消编辑
@@ -920,7 +899,6 @@ export default function ResumeBatchPage() {
                           保存模型配置
                         </Button>
                         <Button
-                          variant="outline"
                           disabled={adminSaving || !adminConfig?.llm.configured}
                           onClick={() => runAdminAction({ action: 'test_llm' })}
                         >
@@ -962,7 +940,6 @@ export default function ResumeBatchPage() {
                       保存参考范例
                     </Button>
                     <Button
-                      variant="outline"
                       disabled={adminSaving || !adminConfig?.llm.customStyleSample}
                       onClick={() => runAdminAction({ action: 'reset_style' })}
                     >
@@ -989,7 +966,6 @@ export default function ResumeBatchPage() {
             </TabsContent>
           )}
         </Tabs>
-      </main>
-    </div>
+    </>
   );
 }

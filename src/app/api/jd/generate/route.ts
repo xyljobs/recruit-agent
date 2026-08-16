@@ -6,7 +6,11 @@ import { parseLimitedJson, SMALL_JSON_BODY_LIMIT } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
 import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 
-const generateBodySchema = z.object({ jobId: z.string().min(1) });
+const generateBodySchema = z.object({
+  jobId: z.string().min(1),
+  // 深度思考模式：思考型模型先深度推理用人标准再撰写，文案质量更高但首字前有分钟级推理耗时
+  deepThinking: z.boolean().optional(),
+});
 
 interface JobRow {
   title: string | null;
@@ -21,12 +25,18 @@ interface JobRow {
   benefits: string[] | null;
 }
 
+/** 发布版 JD 固定告知行：候选人投递前可见的自动化决策告知（PIPL 第17条告知义务），须与 JD 同时发布 */
+const AI_EVALUATION_DISCLOSURE_LINE =
+  '【招聘流程说明】本职位招聘使用 AI 辅助评估简历，最终录用决定由招聘团队作出；如需人工评估请在投递时备注。';
+
 const GENERATE_PROMPT_HEAD = `你是一个专业的招聘文案专家。请基于以下结构化职位要求，生成一份适合在招聘平台（如Boss直聘、智联招聘）发布的职位描述。
 
 要求：
 - 直接输出纯文本，使用【】分节，顺序为：【招聘岗位】【岗位职责】【任职要求】【福利待遇】；工作地点、薪资范围如有则附在招聘岗位末尾一行；
 - 岗位职责与任职要求用编号列表，各 3-6 条，简洁专业；
 - 可在不改变事实的前提下润色措辞、增强吸引力；不得虚构公司名称、薪资承诺等要求中不存在的事实；
+- 结尾必须另起一行，原样输出以下自动化评估告知（一字不改）：
+${AI_EVALUATION_DISCLOSURE_LINE}
 - 不要输出描述正文以外的任何解释或点评。
 
 结构化职位要求：
@@ -36,8 +46,10 @@ function listText(items: string[] | null): string {
   return (items ?? []).join('、');
 }
 
-/** 生成流空闲超时：超过该时间未收到新分片即中止，回退本地模板 */
+/** 快速模式流空闲超时：超过该时间未收到新分片即中止，回退本地模板 */
 const GENERATE_STREAM_IDLE_TIMEOUT_MS = 30_000;
+/** 深度思考模式流空闲超时：开思考实测首字前推理可达 2 分钟，保留 5 分钟余量避免成功请求被误杀 */
+const GENERATE_DEEP_IDLE_TIMEOUT_MS = 300_000;
 
 /** 为异步分片流增加空闲超时：超时未产出新分片则抛出错误，避免请求永久挂起 */
 async function* withIdleTimeout<T>(
@@ -113,6 +125,8 @@ function buildTemplateDescription(job: JobRow): string {
   lines.push('');
 
   lines.push(`【福利待遇】${job.benefits?.length ? listText(job.benefits) : '面议'}`);
+  lines.push('');
+  lines.push(AI_EVALUATION_DISCLOSURE_LINE);
   return lines.join('\n');
 }
 
@@ -125,11 +139,12 @@ export async function POST(request: NextRequest) {
   try {
     const startedAt = Date.now();
     const { supabase, user } = await getTenantRequestContext(request);
-    const { jobId } = await parseLimitedJson(
+    const { jobId, deepThinking } = await parseLimitedJson(
       request,
       generateBodySchema,
       SMALL_JSON_BODY_LIMIT,
     );
+    const useDeepThinking = deepThinking === true;
 
     // 限流、职位查询、租户 AI 网关三者相互独立，并行执行以减少首字前的串行 DB 往返
     const [, jobQuery, aiGateway] = await Promise.all([
@@ -152,7 +167,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const jobRow = job as JobRow;
-    console.info(`[jd/generate] 前置准备耗时 ${Date.now() - startedAt}ms（canUseModel=${aiGateway.canUseModel}）`);
+    console.info(`[jd/generate] 前置准备耗时 ${Date.now() - startedAt}ms（deepThinking=${useDeepThinking}，canUseModel=${aiGateway.canUseModel}）`);
 
     /** 发布版描述持久化：写入 publish_jd 供下次进入页面直接复用；失败仅影响缓存复用，不阻断本次生成结果 */
     const persistPublishJd = async (description: string) => {
@@ -183,10 +198,10 @@ export async function POST(request: NextRequest) {
               aiGateway.stream([{ role: 'user', content: prompt }], {
                 model: aiGateway.policy.modelName ?? undefined,
                 temperature: 0.6,
-                // 文案生成属轻量任务，关闭思考模型的隐式推理，避免分钟级首 token 延迟
-                enableThinking: false,
+                // 深度思考：显式开启思考模型隐式推理；快速模式：关闭思考避免分钟级首 token 延迟
+                enableThinking: useDeepThinking,
               }),
-              GENERATE_STREAM_IDLE_TIMEOUT_MS,
+              useDeepThinking ? GENERATE_DEEP_IDLE_TIMEOUT_MS : GENERATE_STREAM_IDLE_TIMEOUT_MS,
             );
             for await (const chunk of chunks) {
               if (!chunk.content) continue;
@@ -200,6 +215,11 @@ export async function POST(request: NextRequest) {
             }
             description = description.trim();
             if (description) {
+              // 兜底：模型未按提示输出告知行时确定性补齐，保证发布版 JD 恒含自动化评估告知
+              if (!description.includes('【招聘流程说明】')) {
+                description = `${description}\n\n${AI_EVALUATION_DISCLOSURE_LINE}`;
+                enqueueLine({ type: 'delta', text: `\n\n${AI_EVALUATION_DISCLOSURE_LINE}` });
+              }
               console.info(`[jd/generate] 生成完成，总耗时 ${Date.now() - startedAt}ms，${description.length} 字`);
               // done 前完成持久化：前端收到 done 后 reloadJobs 能读到最新 publish_jd
               await persistPublishJd(description);

@@ -46,6 +46,8 @@ const eslintConfig = defineConfig([
     'dist/**',
     'dist-workers/**',
     '.tmp/**',
+    // 走查/调试临时脚本（CommonJS，非交付代码）:
+    'tmp/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
     // Boss search skill assets (Python venv, generated resumes, worker scripts):

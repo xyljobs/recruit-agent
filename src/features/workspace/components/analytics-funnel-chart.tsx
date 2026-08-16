@@ -14,7 +14,7 @@ export default function AnalyticsFunnelChart({
 }: {
   funnelData: FunnelData[];
 }) {
-  const colors = ['#6B7280', '#3B82F6', '#F59E0B', '#8B5CF6', '#10B981'];
+  const colors = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
   const data = funnelData.map((item, index) => ({
     ...item,
     name: item.stage,
@@ -29,7 +29,7 @@ export default function AnalyticsFunnelChart({
         <Funnel dataKey="count" data={data} isAnimationActive>
           <LabelList
             position="right"
-            fill="#374151"
+            fill="var(--muted-foreground)"
             stroke="none"
             dataKey="name"
           />

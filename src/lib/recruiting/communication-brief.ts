@@ -6,7 +6,6 @@ const briefItemSchema = z.string().trim().min(1).max(300);
 export const communicationBriefContentSchema = z.strictObject({
   candidate_value_points: z.array(briefItemSchema).max(6),
   facts_to_verify: z.array(briefItemSchema).max(8),
-  interview_questions: z.array(briefItemSchema).max(8),
   prohibited_claims: z.array(briefItemSchema).max(8),
   draft_message: z.string().trim().min(1).max(3000),
 });
@@ -58,9 +57,6 @@ export function createRulesOnlyCommunicationBrief(
   const candidateValuePoints = supportedFindings.length > 0
     ? supportedFindings
     : ['候选人的具体经历与职位要求需要在沟通中进一步确认'];
-  const interviewQuestions = factsToVerify.length > 0
-    ? factsToVerify.map(fact => `请候选人补充说明：${fact}`).slice(0, 6)
-    : ['请候选人介绍与该职位核心要求最相关的一段实际经历'];
   const firstValuePoint = candidateValuePoints[0];
   const locationText = input.location ? `，工作地点为${input.location}` : '';
   const salaryText = input.salary_range ? `，薪酬范围为${input.salary_range}` : '';
@@ -68,14 +64,20 @@ export function createRulesOnlyCommunicationBrief(
   return communicationBriefContentSchema.parse({
     candidate_value_points: candidateValuePoints,
     facts_to_verify: factsToVerify,
-    interview_questions: interviewQuestions,
     prohibited_claims: [...STANDARD_PROHIBITED_CLAIMS],
     draft_message: `${input.candidate_name}您好，我们正在招聘${input.job_title}${locationText}${salaryText}。从现有资料看，${firstValuePoint}。目前这些信息仅用于招聘人员的初步判断，我们希望进一步了解您的真实经历与求职意向。${input.communication_goal}如您方便，期待安排一次简短沟通。`,
   });
 }
 
+/**
+ * 模型输出的宽松 schema：用 z.object（默认 strip 未知字段）忽略 LLM 常见的
+ * 多余字段，避免整体误报；严格 schema（communicationBriefContentSchema）仍用于
+ * rules_only 构建。
+ */
+const modelCommunicationBriefSchema = z.object({ ...communicationBriefContentSchema.shape });
+
 export function parseModelCommunicationBrief(value: string): CommunicationBriefContent {
-  const parsed = communicationBriefContentSchema.parse(
+  const parsed = modelCommunicationBriefSchema.parse(
     JSON.parse(extractJsonObject(value)),
   );
   return {

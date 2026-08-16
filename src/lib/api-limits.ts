@@ -33,6 +33,12 @@ export const candidateListQuerySchema = z.object({
     .default(20),
   search: z.string().trim().max(100, '搜索词不能超过 100 个字符').default(''),
   masked: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  // 按绑定职位过滤（候选人库默认视图）
+  jobId: idSchema.optional(),
+  // 仅看未绑定职位的候选人（资源池管理）
+  unbound: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  // 仅看已绑定任意职位的候选人（候选人库默认视图：没绑定的归资源池管）
+  bound: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
 });
 
 const bossKeywordSchema = z.object({
@@ -119,6 +125,8 @@ export const batchMatchStatusQuerySchema = z.object({
 export const jdParseBodySchema = z.object({
   jdContent: jdContentSchema,
   jobId: idSchema.optional(),
+  // 深度思考模式：思考型模型先深度推理 JD 语义再输出，结果更精准但首字前有分钟级推理耗时
+  deepThinking: z.boolean().optional(),
 });
 
 export const candidateSearchBodySchema = z.strictObject({

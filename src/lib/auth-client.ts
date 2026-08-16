@@ -33,6 +33,19 @@ export function clearAuthToken(): void {
  * 自动从 sessionStorage 读取 token 并附加到请求头
  * 同时保留 credentials: 'include' 以兼容 cookie 认证
  */
+/**
+ * 网络层错误（服务重启窗口 / 连接中断）时 fetch 会抛出 TypeError，
+ * 原始文案如 Chrome 的「Failed to fetch」对用户不可理解。
+ * 这里统一做一次自动重试（等待 2 秒，覆盖服务重启瞬断场景），
+ * 仍失败则替换为友好文案。
+ */
+const NETWORK_ERROR_MESSAGE = '服务连接中断，请稍后重试';
+const NETWORK_RETRY_DELAY_MS = 2000;
+
+function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError;
+}
+
 export async function authFetch(input: string, init?: RequestInit): Promise<Response> {
   const token = getAuthToken();
   const headers = new Headers(init?.headers);
@@ -52,9 +65,24 @@ export async function authFetch(input: string, init?: RequestInit): Promise<Resp
       headers.set('X-CSRF-Token', decodeURIComponent(csrfCookie.split('=').slice(1).join('=')));
     }
   }
-  return fetch(withBasePath(input), {
+  const requestInit: RequestInit = {
     ...init,
     headers,
     credentials: 'include',
-  });
+  };
+  const url = withBasePath(input);
+  try {
+    return await fetch(url, requestInit);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    await new Promise(resolve => setTimeout(resolve, NETWORK_RETRY_DELAY_MS));
+    try {
+      return await fetch(url, requestInit);
+    } catch (retryError) {
+      if (isNetworkError(retryError)) {
+        throw new Error(NETWORK_ERROR_MESSAGE);
+      }
+      throw retryError;
+    }
+  }
 }

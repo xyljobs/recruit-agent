@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Copy, ShieldCheck } from 'lucide-react';
+import { Copy, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { authFetch, setAuthToken } from '@/lib/auth-client';
-import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -145,23 +144,13 @@ export default function SecurityPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
-      <div className="mx-auto w-full max-w-xl py-8">
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BrandLogo className="h-12 w-12 drop-shadow-lg drop-shadow-blue-500/30" />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">账号安全</h1>
-              <p className="text-sm text-gray-500">人才决策Agent 双重验证</p>
-            </div>
-          </div>
-          <Button variant="ghost" onClick={() => router.push('/')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            返回
-          </Button>
-        </div>
+    <div className="mx-auto w-full max-w-xl py-6">
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-gray-900">账号安全</h1>
+        <p className="text-sm text-gray-500">人才决策Agent 双重验证</p>
+      </div>
 
-        <Card className="border-0 shadow-xl">
+      <Card className="border-0 shadow-xl">
           <CardHeader>
             <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
               <ShieldCheck className="h-6 w-6 text-blue-600" />
@@ -268,7 +257,6 @@ export default function SecurityPage() {
                 </div>
                 <Button
                   className="mt-3"
-                  variant="outline"
                   onClick={() => copyText(recoveryCodes.join('\n'))}
                 >
                   <Copy className="mr-2 h-4 w-4" />
@@ -279,6 +267,5 @@ export default function SecurityPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
   );
 }

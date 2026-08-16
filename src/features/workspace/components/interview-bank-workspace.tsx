@@ -314,7 +314,7 @@ export function InterviewBankWorkspace() {
                 <Info className="mr-1 inline h-3.5 w-3.5" />
                 用 <code className="rounded bg-slate-100 px-1">|</code> 或全角 <code className="rounded bg-slate-100 px-1">｜</code> 分隔；考察点必填，期望信号可选。错误行会被跳过并单独反馈，不影响其余行导入。导入的题目均为组织级。
               </p>
-              <Button variant="outline" onClick={() => void importBulk()} disabled={importing}><Upload className="mr-2 h-4 w-4" />{importing ? '导入中…' : '批量导入'}</Button>
+              <Button onClick={() => void importBulk()} disabled={importing}><Upload className="mr-2 h-4 w-4" />{importing ? '导入中…' : '批量导入'}</Button>
               {importResult && (
                 <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
                   <p className="font-medium text-slate-900">导入结果：新增 {importResult.created} 条，跳过重复 {importResult.skipped} 条</p>
@@ -352,7 +352,7 @@ export function InterviewBankWorkspace() {
                 <SelectItem value="job">职位级</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="icon" onClick={() => void loadRows()} disabled={loading} aria-label="刷新题库" title="刷新题库"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></Button>
+            <Button size="icon" onClick={() => void loadRows()} disabled={loading} aria-label="刷新题库" title="刷新题库"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -413,7 +413,7 @@ export function InterviewBankWorkspace() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
+            <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
             <Button onClick={() => void saveEdit()} disabled={patching}>{patching ? '保存中…' : '保存'}</Button>
           </DialogFooter>
         </DialogContent>

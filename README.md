@@ -25,6 +25,8 @@ pnpm dev
 `admin:bootstrap` 仅用于创建首个组织管理员。执行时临时注入 `.env.example`
 中列出的 `BOOTSTRAP_ADMIN_*` 和 `BOOTSTRAP_ORGANIZATION_*` 变量，成功后立即删除。
 
+演示或自测弄脏数据后，可用 `pnpm seed:reset` 一键清空两个演示组织的业务数据并自动重跑 seed 恢复基线（保留组织、账号与 AI 审批）；加 `-- --dry-run` 仅预览删除范围。
+
 启动后访问 [http://localhost:5000](http://localhost:5000)。生产构建使用：
 
 ```bash

@@ -31,7 +31,7 @@ const MODEL_PROMPT = `你是一位企业招聘人员的面试准备助手。请�
 5. 只返回一个严格 JSON 对象，不要 Markdown，不要额外字段。
 
 JSON 字段：
-- focus_areas: Array<{ dimension, why, must_verify }>，最多6项
+- focus_areas: Array<{ dimension, why, must_verify }>，最多6项；must_verify 必须是布尔值 true 或 false（true=面试中必须核实，false=仅作参考），不要写文字描述
 - common_questions: 必须为空数组
 - targeted_questions: 6-10项，每项 { question, dimension, origin, expected_signals[], probe_followups[], scoring_anchors[] }
   - origin 取值：evidence_gap（证据缺口）/ depth_check（证据冲突或部分支持，需深挖）/ boundary_risk（边界风险）/ resume_probe（针对简历具体项目追问）
@@ -193,93 +193,141 @@ export async function POST(request: NextRequest) {
       request.headers,
       authorizationContext.externalProcessors,
     );
-    let content: InterviewGuideContent;
-    if (!aiGateway.canUseModel) {
-      content = buildRulesOnlyInterviewGuide(commonQuestions, sourceInput);
-    } else {
-      const prompt = MODEL_PROMPT.replace('{input}', JSON.stringify({
-        accepted_shortlist_evidence: modelEvidence,
-        gaps,
-        missing_information: missingInformation,
-        boundary_flags: boundaryFlags,
-        candidate: {
-          skills: candidate.skills,
-          experience_years: candidate.experience_years,
-          resume_text: typeof candidate.resume_text === 'string'
-            ? candidate.resume_text.slice(0, 8000)
-            : null,
-        },
-      }));
-      let rawOutput = '';
-      const stream = aiGateway.stream(
-        [{ role: 'user', content: prompt }],
-        {
-          model: aiGateway.policy.modelName ?? undefined,
-          temperature: 0.4,
-        },
-        {
-          directIdentifiers: [
-            candidateName,
-            currentCompany,
-            currentPosition,
-          ].filter((value): value is string => Boolean(value)),
-        },
-      );
-      for await (const chunk of stream) {
-        rawOutput += chunk.content;
-        if (rawOutput.length > 20_000) {
-          throw new ApiRequestError('模型返回内容过长', 502);
+    const finalizeGuide = async (content: InterviewGuideContent) => {
+      for (const item of content.targeted_questions) {
+        assertNoProhibitedTopic(item.question);
+        for (const followup of item.probe_followups) {
+          assertNoProhibitedTopic(followup);
         }
       }
-      try {
-        content = parseModelInterviewGuide(rawOutput);
-      } catch {
-        throw new ApiRequestError('模型未返回有效的结构化面试提纲', 502);
-      }
-      // 公共题原文只从题库拼回，模型输出中的公共题一律丢弃（防改写）
-      content = {
-        ...content,
-        common_questions: commonQuestions.map(item => ({
-          bank_id: item.id,
-          question: item.question,
-          dimension: item.dimension,
-        })),
-      };
-    }
 
-    for (const item of content.targeted_questions) {
-      assertNoProhibitedTopic(item.question);
-      for (const followup of item.probe_followups) {
-        assertNoProhibitedTopic(followup);
-      }
-    }
-
-    const { data: storedGuide, error: guideError } = await supabase.rpc(
-      'create_interview_guide',
-      {
-        p_shortlist_entry_id: entry.id,
-        p_prompt_version: PROMPT_VERSION,
-        p_ai_mode: aiGateway.mode,
-        p_focus_areas: content.focus_areas,
-        p_questions: {
-          common_questions: content.common_questions,
-          targeted_questions: content.targeted_questions,
+      const { data: storedGuide, error: guideError } = await supabase.rpc(
+        'create_interview_guide',
+        {
+          p_shortlist_entry_id: entry.id,
+          p_prompt_version: PROMPT_VERSION,
+          p_ai_mode: aiGateway.mode,
+          p_focus_areas: content.focus_areas,
+          p_questions: {
+            common_questions: content.common_questions,
+            targeted_questions: content.targeted_questions,
+          },
+          p_red_flags: content.red_flags_to_check,
+          p_interview_loop: content.interview_loop,
+          p_common_question_ids: content.common_questions.map(item => item.bank_id),
         },
-        p_red_flags: content.red_flags_to_check,
-        p_interview_loop: content.interview_loop,
-        p_common_question_ids: content.common_questions.map(item => item.bank_id),
-      },
-    );
-    if (guideError) {
-      throw rpcErrorToRequestError(guideError, '保存面试提纲失败');
-    }
+      );
+      if (guideError) {
+        throw rpcErrorToRequestError(guideError, '保存面试提纲失败');
+      }
 
-    return NextResponse.json({
-      success: true,
-      data: {
+      return {
         guide: storedGuide,
         content,
         candidate_name: candidateName,
+      };
+    };
+
+    // rules_only 模式：本地规则即时返回 JSON（无外部调用，无需流式）
+    if (!aiGateway.canUseModel) {
+      const content = buildRulesOnlyInterviewGuide(commonQuestions, sourceInput);
+      const data = await finalizeGuide(content);
+      return NextResponse.json({ success: true, data });
+    }
+
+    // AI 模式：NDJSON 流式，逐分片回传生成过程，done 携带最终面试提纲
+    const prompt = MODEL_PROMPT.replace('{input}', JSON.stringify({
+      accepted_shortlist_evidence: modelEvidence,
+      gaps,
+      missing_information: missingInformation,
+      boundary_flags: boundaryFlags,
+      candidate: {
+        skills: candidate.skills,
+        experience_years: candidate.experience_years,
+        resume_text: typeof candidate.resume_text === 'string'
+          ? candidate.resume_text.slice(0, 8000)
+          : null,
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enqueueLine = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        };
+        enqueueLine({ type: 'start' });
+        try {
+          let rawOutput = '';
+          const chunks = aiGateway.stream(
+            [{ role: 'user', content: prompt }],
+            {
+              model: aiGateway.policy.modelName ?? undefined,
+              temperature: 0.4,
+              // 思考模型默认会先输出大量隐式推理（qwen3.7-plus），结构化 JSON 抽取无需思考，
+              // 显式关闭以避免输出散漫文字破坏 JSON 解析（与 jd/parse、jd/keywords 等接口一致）
+              enableThinking: false,
+            },
+            {
+              directIdentifiers: [
+                candidateName,
+                currentCompany,
+                currentPosition,
+              ].filter((value): value is string => Boolean(value)),
+            },
+          );
+          for await (const chunk of chunks) {
+            rawOutput += chunk.content;
+            if (rawOutput.length > 20_000) {
+              throw new ApiRequestError('模型返回内容过长', 502);
+            }
+            enqueueLine({ type: 'delta', text: chunk.content });
+          }
+          let content: InterviewGuideContent;
+          try {
+            content = parseModelInterviewGuide(rawOutput);
+          } catch (parseError) {
+            const detail = parseError instanceof z.ZodError
+              ? parseError.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('；')
+              : (parseError instanceof Error ? parseError.message : '未知解析错误');
+            const snippet = rawOutput.replace(/\s+/g, ' ').trim().slice(0, 400);
+            throw new ApiRequestError(`模型未返回有效的结构化面试提纲：${detail}｜原始输出片段：${snippet}`, 502);
+          }
+          // 公共题原文只从题库拼回，模型输出中的公共题一律丢弃（防改写）
+          content = {
+            ...content,
+            common_questions: commonQuestions.map(item => ({
+              bank_id: item.id,
+              question: item.question,
+              dimension: item.dimension,
+            })),
+          };
+          // 兜底：模型专项题不足 6 条时用规则题补齐，保证与 rules_only 一致的体验
+          if (content.targeted_questions.length < 6) {
+            const fallback = buildRulesOnlyInterviewGuide(commonQuestions, sourceInput).targeted_questions;
+            const existing = new Set(content.targeted_questions.map(item => item.question));
+            const fillers = fallback.filter(item => !existing.has(item.question));
+            content = {
+              ...content,
+              targeted_questions: [...content.targeted_questions, ...fillers].slice(0, 10),
+            };
+          }
+          const data = await finalizeGuide(content);
+          enqueueLine({ type: 'done', data });
+          controller.close();
+        } catch (streamError) {
+          enqueueLine({
+            type: 'error',
+            error: streamError instanceof Error ? streamError.message : '生成面试提纲失败',
+          });
+          controller.close();
+        }
+      },
+    });
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
       },
     });
   } catch (error) {

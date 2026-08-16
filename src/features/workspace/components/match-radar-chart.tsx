@@ -26,14 +26,14 @@ export default function MatchRadarChart({ match }: { match: MatchRecord }) {
         <PolarGrid />
         <PolarAngleAxis
           dataKey="subject"
-          tick={{ fill: '#6B7280', fontSize: 11 }}
+          tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
         />
         <PolarRadiusAxis angle={30} domain={[0, 100]} />
         <Radar
           name="匹配度"
           dataKey="score"
-          stroke="#3B82F6"
-          fill="#3B82F6"
+          stroke="var(--primary)"
+          fill="var(--primary)"
           fillOpacity={0.5}
         />
       </RadarChart>

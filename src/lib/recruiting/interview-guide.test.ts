@@ -5,6 +5,7 @@ import {
   buildRulesOnlyInterviewGuide,
   canPrepareInterviewGuide,
   interviewGuideContentSchema,
+  interviewGuideQuestionsSchema,
   parseBankBulkText,
   parseModelInterviewGuide,
   PROHIBITED_INTERVIEW_TOPICS,
@@ -166,11 +167,11 @@ test('interview guide requires the snapshot and latest event to agree on accepte
   assert.equal(canPrepareInterviewGuide('unreviewed', undefined), false);
 });
 
-test('model guide parser accepts strict JSON without common questions and rejects extra fields', () => {
+test('model guide parser strips unknown fields, coerces numbers, drops common questions, and requires at least one targeted question', () => {
   const result = parseModelInterviewGuide(`\`\`\`json
   {
     "focus_areas": [{ "dimension": "管理经验", "why": "证据冲突", "must_verify": true }],
-    "common_questions": [],
+    "common_questions": [{ "question": "模型误输出的公共题", "dimension": "综合" }],
     "targeted_questions": [
       { "question": "请介绍项目", "dimension": "项目经验", "origin": "depth_check", "expected_signals": [], "probe_followups": [], "scoring_anchors": [] },
       { "question": "请说明缺口", "dimension": "到岗时间", "origin": "evidence_gap", "expected_signals": [], "probe_followups": [], "scoring_anchors": [] },
@@ -180,13 +181,18 @@ test('model guide parser accepts strict JSON without common questions and reject
       { "question": "兜底二", "dimension": "综合", "origin": "depth_check", "expected_signals": [], "probe_followups": [], "scoring_anchors": [] }
     ],
     "red_flags_to_check": ["核实管理年限"],
-    "interview_loop": [{ "round": 1, "focus": "初面", "minutes": 45, "interviewer_role": "HR" }],
-    "prohibited_topics": ["婚姻与生育计划"]
+    "interview_loop": [{ "round": "1", "focus": "初面", "minutes": "45", "interviewer_role": "HR" }],
+    "prohibited_topics": ["婚姻与生育计划"],
+    "score": 99
   }
   \`\`\``);
   assert.equal(result.common_questions.length, 0);
   assert.equal(result.targeted_questions.length, 6);
+  assert.equal(result.interview_loop[0].round, 1);
+  assert.equal(result.interview_loop[0].minutes, 45);
+  assert.ok(!('score' in result));
 
+  // 专项题完全为空时仍拒绝（min 1）
   assert.throws(() => parseModelInterviewGuide(JSON.stringify({
     focus_areas: [],
     common_questions: [],
@@ -194,6 +200,33 @@ test('model guide parser accepts strict JSON without common questions and reject
     red_flags_to_check: [],
     interview_loop: [],
     prohibited_topics: [],
-    score: 99,
   })));
+});
+
+// 7. 编辑保存 schema：允许答案、可选 bank_id，且专项题不强制下限（HR 可删到少于 6 条）
+test('editable questions schema accepts answers and manual questions without bank_id', () => {
+  const parsed = interviewGuideQuestionsSchema.parse({
+    common_questions: [
+      { question: '手动新增的公共题', dimension: '综合', answer: '候选人回答要点' },
+    ],
+    targeted_questions: [
+      { question: '请介绍项目', dimension: '项目经验', origin: 'depth_check', expected_signals: [], probe_followups: [], scoring_anchors: [], answer: '主导过核心模块' },
+    ],
+  });
+  assert.equal(parsed.common_questions.length, 1);
+  assert.equal(parsed.common_questions[0].bank_id, undefined);
+  assert.equal(parsed.common_questions[0].answer, '候选人回答要点');
+  assert.equal(parsed.targeted_questions[0].answer, '主导过核心模块');
+
+  // 专项题数量无下限（HR 可删减），但 origin 取值仍受限
+  assert.doesNotThrow(() => interviewGuideQuestionsSchema.parse({
+    common_questions: [],
+    targeted_questions: [],
+  }));
+  assert.throws(() => interviewGuideQuestionsSchema.parse({
+    common_questions: [],
+    targeted_questions: [
+      { question: '非法来源', dimension: '综合', origin: 'bad_origin', expected_signals: [], probe_followups: [], scoring_anchors: [] },
+    ],
+  }));
 });

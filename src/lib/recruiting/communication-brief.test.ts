@@ -36,7 +36,6 @@ test('model brief parser accepts fenced JSON and always adds core prohibitions',
   {
     "candidate_value_points": ["经验相关"],
     "facts_to_verify": [],
-    "interview_questions": ["请介绍项目"],
     "prohibited_claims": [],
     "draft_message": "您好，想与您进一步沟通。"
   }
@@ -44,15 +43,16 @@ test('model brief parser accepts fenced JSON and always adds core prohibitions',
   assert.equal(result.prohibited_claims.length, STANDARD_PROHIBITED_CLAIMS.length);
 });
 
-test('model brief parser rejects score fields and other unexpected output', () => {
-  assert.throws(() => parseModelCommunicationBrief(JSON.stringify({
-    candidate_value_points: [],
+test('model brief parser strips score fields and other unexpected output', () => {
+  const result = parseModelCommunicationBrief(JSON.stringify({
+    candidate_value_points: ['经验相关'],
     facts_to_verify: [],
-    interview_questions: [],
     prohibited_claims: [],
     draft_message: '您好',
     score: 99,
-  })));
+  }));
+  assert.equal(result.draft_message, '您好');
+  assert.ok(!('score' in result));
 });
 
 test('communication preparation requires both the snapshot and latest event to be accepted', () => {

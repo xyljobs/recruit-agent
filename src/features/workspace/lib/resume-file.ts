@@ -13,6 +13,69 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+const MAX_IMPORT_FILES = 50; // 导入列表总量上限（多批追加共享同一上限）
+
+const SUPPORTED_RESUME_EXTENSIONS = ['.pdf', '.docx', '.doc', '.txt', '.md'];
+
+/** 合并导入文件的结果：files 为合并后的完整列表，其余为本次被忽略的明细计数 */
+export interface ResumeImportMergeResult {
+  files: File[];
+  /** 类型不支持被忽略的数量 */
+  unsupported: number;
+  /** 超过 20MB 被忽略的数量 */
+  oversize: number;
+  /** 与列表中已有文件重复被忽略的数量（同名 + 同大小 + 同修改时间视为同一份） */
+  duplicates: number;
+  /** 超出总量上限被忽略的数量 */
+  overflow: number;
+}
+
+/**
+ * 追加合并简历导入文件（再次上传不再覆盖已有列表）：
+ * 过滤不支持类型与超大文件，按 文件名+大小+修改时间 去重（重复上传视为误操作直接忽略），
+ * 合并后总量封顶 50 份。所有导入入口（候选人库拖拽区、职位页导入弹窗）共用。
+ */
+export function mergeResumeImportFiles(
+  previous: File[],
+  incoming: File[],
+): ResumeImportMergeResult {
+  const keyOf = (file: File) => `${file.name}|${file.size}|${file.lastModified}`;
+  const seen = new Set(previous.map(keyOf));
+  const fresh: File[] = [];
+  let unsupported = 0;
+  let oversize = 0;
+  let duplicates = 0;
+  for (const file of incoming) {
+    if (
+      !SUPPORTED_RESUME_EXTENSIONS.some(ext =>
+        file.name.toLowerCase().endsWith(ext),
+      )
+    ) {
+      unsupported += 1;
+      continue;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      oversize += 1;
+      continue;
+    }
+    const key = keyOf(file);
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+    fresh.push(file);
+  }
+  const room = Math.max(0, MAX_IMPORT_FILES - previous.length);
+  const accepted = fresh.slice(0, room);
+  return {
+    files: [...previous, ...accepted],
+    unsupported,
+    oversize,
+    duplicates,
+    overflow: fresh.length - accepted.length,
+  };
+}
 
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   const document = await pdfjsLib
@@ -71,25 +134,59 @@ export async function previewResumeFile(file: File): Promise<ResumePreview> {
 
 /**
  * 把简历原文件上传到候选人记录（私有存储），供候选人详情展示原始简历。
- * 入库成功后再调用；失败抛错由调用方决定提示方式（不影响入库结果）。
+ * 入库成功后即调用——原件属于「解析入库」动作的一部分，必须尽最大努力落盘：
+ * 网络瞬断 / 服务重启窗口 / 5xx 自动重试（2s/4s/8s 共 4 次尝试），
+ * 4xx 业务错误（类型/大小不符）重试无意义，直接抛出由调用方提示。
  */
+const UPLOAD_RETRY_DELAYS_MS = [2000, 4000, 8000];
+
+class ResumeUploadBusinessError extends Error {}
+
 export async function uploadCandidateResumeFile(
   candidateId: string,
   file: File,
 ): Promise<void> {
   const formData = new FormData();
   formData.set('file', file);
-  const response = await authFetch(
-    `/api/candidates/${candidateId}/resume-file`,
-    {
-      method: 'POST',
-      body: formData,
-    },
-  );
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || '原始简历文件保存失败');
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= UPLOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, UPLOAD_RETRY_DELAYS_MS[attempt - 1]));
+    }
+    try {
+      const response = await authFetch(
+        `/api/candidates/${candidateId}/resume-file`,
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+      const result = (await response.json().catch(() => null)) as
+        | { success?: boolean; error?: string }
+        | null;
+      if (response.ok && result?.success) {
+        return;
+      }
+      if (response.status < 500) {
+        // 业务错误（文件类型/大小/权限）：重试不会改变结果
+        throw new ResumeUploadBusinessError(
+          result?.error || '原始简历文件保存失败',
+        );
+      }
+      lastError = new Error(result?.error || '服务器暂时不可用');
+    } catch (error) {
+      if (error instanceof ResumeUploadBusinessError) {
+        throw error;
+      }
+      // 网络层错误（服务重启窗口 / 连接中断）：进入下一轮重试
+      lastError = error;
+    }
   }
+  throw new Error(
+    `原始简历文件暂未保存（已自动重试）：${
+      lastError instanceof Error ? lastError.message : '网络异常'
+    }`,
+  );
 }
 
 /** 从简历文件提取纯文本；不支持的类型抛出中文错误提示 */

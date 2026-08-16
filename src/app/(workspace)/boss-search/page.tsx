@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import NextImage from 'next/image';
 import { toast } from 'sonner';
 import {
@@ -13,7 +12,6 @@ import {
   Globe,
   AlertCircle,
   CheckCircle2,
-  ChevronRight,
   Image as ImageIcon,
   Clock,
   Monitor,
@@ -98,10 +96,10 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
 };
 
 export default function BossSearchPage() {
-  const router = useRouter();
   const [jdText, setJdText] = useState('');
   const [keywords, setKeywords] = useState<KeywordGroup[]>([]);
   const [keywordLoading, setKeywordLoading] = useState(false);
+  const [keywordPreview, setKeywordPreview] = useState('');
   const [taskStatus, setTaskStatus] = useState<TaskStatusData | null>(null);
   const [creating, setCreating] = useState(false);
   const [resumeCandidate, setResumeCandidate] = useState<CandidateResult | null>(null);
@@ -140,23 +138,66 @@ export default function BossSearchPage() {
       return;
     }
     setKeywordLoading(true);
+    setKeywordPreview('');
     try {
       const res = await authFetch('/api/boss-search/keywords', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jdContent: jdText }),
       });
-      const json = await res.json();
-      if (json.success) {
-        setKeywords(json.data.keywords);
-        toast.success(`已生成 ${json.data.keywords.length} 组搜索关键词`);
-      } else {
-        toast.error(json.error || '关键词生成失败');
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(json?.error || '关键词生成失败');
       }
-    } catch {
-      toast.error('关键词生成失败，请稍后重试');
+      // JSON 响应：限流 / AI 未启用等前置错误
+      if (contentType.includes('application/json')) {
+        const json = await res.json();
+        if (json.success) {
+          setKeywords(json.data.keywords);
+          toast.success(`已生成 ${json.data.keywords.length} 组搜索关键词`);
+        } else {
+          toast.error(json.error || '关键词生成失败');
+        }
+        return;
+      }
+      // NDJSON 流式：delta 为生成过程，done 携带最终结果
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('关键词生成失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+      const outcome: { keywords?: KeywordGroup[]; error?: string } = {};
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: { type?: string; text?: string; data?: { keywords?: KeywordGroup[] }; error?: string } = JSON.parse(line);
+        if (event.type === 'delta' && event.text) {
+          accumulated += event.text;
+          setKeywordPreview(accumulated);
+        } else if (event.type === 'done' && event.data) {
+          outcome.keywords = event.data.keywords;
+        } else if (event.type === 'error') {
+          outcome.error = event.error || '关键词生成失败';
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+      if (outcome.error) throw new Error(outcome.error);
+      if (!outcome.keywords) throw new Error('关键词生成失败');
+      setKeywords(outcome.keywords);
+      toast.success(`已生成 ${outcome.keywords.length} 组搜索关键词`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '关键词生成失败，请稍后重试');
     } finally {
       setKeywordLoading(false);
+      setKeywordPreview('');
     }
   }, [jdText]);
 
@@ -485,24 +526,14 @@ export default function BossSearchPage() {
   const isRunning = taskStatus && ['pending', 'running'].includes(taskStatus.status);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-[1440px] px-6 py-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
-              <ChevronRight className="h-4 w-4 rotate-180" />
-              返回主页
-            </Button>
-            <div>
-              <h1 className="text-xl font-semibold flex items-center gap-2">
-                <Globe className="h-5 w-5 text-blue-500" />
-                Boss直聘候选人搜索
-              </h1>
-              <p className="text-sm text-gray-500 mt-0.5">JD &rarr; 关键词策略 &rarr; 简历爬取 &rarr; 评估报告</p>
-            </div>
-          </div>
-        </div>
+    <>
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <Globe className="h-5 w-5 text-blue-500" />
+          Boss直聘候选人搜索
+        </h1>
+        <p className="text-sm text-gray-500 mt-0.5">JD &rarr; 关键词策略 &rarr; 简历爬取 &rarr; 评估报告</p>
+      </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: JD Input & Keywords */}
@@ -535,10 +566,20 @@ export default function BossSearchPage() {
                   ) : (
                     <>
                       <Search className="h-4 w-4 mr-2" />
-                      生成搜索关键词策略
+                      AI生成搜索关键词策略
                     </>
                   )}
                 </Button>
+                {keywordLoading && (
+                  <div className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-muted/50 p-3">
+                    <p className="mb-1 text-xs text-muted-foreground">
+                      正在分析职位要求并拆解搜索关键词，过程实时显示：
+                    </p>
+                    <pre className="whitespace-pre-wrap break-words font-sans text-xs text-muted-foreground">
+                      {keywordPreview || '正在连接模型…'}
+                    </pre>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -610,7 +651,7 @@ export default function BossSearchPage() {
                             disabled={creating || isRunning === true}
                             aria-label={`删除第 ${idx + 1} 组搜索关键词`}
                             title="删除该关键词"
-                            className="shrink-0 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                            className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -697,7 +738,6 @@ export default function BossSearchPage() {
                       </p>
                       <p className="text-sm text-gray-400">登录完成后，点击下方按钮重试</p>
                       <Button
-                        variant="outline"
                         size="sm"
                         onClick={() => startPolling(taskStatus.taskId)}
                       >
@@ -747,7 +787,6 @@ export default function BossSearchPage() {
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Button
                                 type="button"
-                                variant="outline"
                                 size="sm"
                                 className="h-8"
                                 onClick={() => viewResume(cand)}
@@ -912,7 +951,6 @@ export default function BossSearchPage() {
                       <ExternalLink className="h-3 w-3" />
                     </Button>
                     <Button
-                      variant="outline"
                       size="lg"
                       onClick={() => handleReport('download')}
                       disabled={reportAction !== null}
@@ -933,7 +971,6 @@ export default function BossSearchPage() {
             )}
           </div>
         </div>
-      </div>
 
       <Dialog
         open={resumeCandidate !== null}
@@ -989,6 +1026,6 @@ export default function BossSearchPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

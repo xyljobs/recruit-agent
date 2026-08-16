@@ -1,20 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   Briefcase,
   Building2,
+  ChevronDown,
   GraduationCap,
   LoaderCircle,
   Mail,
   Phone,
   Plus,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogContent,
@@ -37,12 +45,10 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
 import { AUTHORIZATION_NOTICE_VERSION } from '@/lib/privacy/authorization-shared';
+import type { ResumeStructure } from '@/lib/recruiting/resume-structure';
 import mammoth from 'mammoth';
 import { useWorkspaceData } from '../hooks/use-workspace-data';
-import {
-  extractResumeTextFromFile,
-  uploadCandidateResumeFile,
-} from '../lib/resume-file';
+import { uploadCandidateResumeFile } from '../lib/resume-file';
 import type { Candidate, CandidateForm, MatchRecord } from '../types';
 
 interface DecisionExplanation {
@@ -65,6 +71,28 @@ const AUTHORIZATION_SOURCE_LABELS: Record<string, string> = {
   recruitment_platform: '招聘平台授权记录',
   other: '其他可核验渠道',
 };
+
+/** 合规留痕里的长引用（来源引用 / 评估编号 / sha256 摘要）：截断展示，hover 看全，点击复制 */
+function CopyableReference({ value }: { value: string }) {
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success('已复制完整编号');
+    } catch {
+      toast.error('复制失败，请手动选择');
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      title={value}
+      className="break-all font-mono text-slate-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-slate-800"
+    >
+      {value.length > 16 ? `${value.slice(0, 16)}…` : value}
+    </button>
+  );
+}
 
 const MATCH_STATUS_LABELS: Record<string, string> = {
   pending: '待接触',
@@ -283,7 +311,7 @@ export function CandidateFormDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {!hideTrigger && (
         <DialogTrigger asChild>
-          <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
+          <Button size="sm">
             <Plus className="h-4 w-4 mr-2" />
             添加候选人
           </Button>
@@ -311,7 +339,7 @@ export function CandidateFormDialog({
                   >
                     <p className="font-medium text-slate-900">
                       {item.name}
-                      <span className="ml-2 font-normal text-gray-500">
+                      <span className="ml-2 font-normal text-muted-foreground">
                         {item.created_at
                           ? `${new Date(item.created_at).toLocaleDateString('zh-CN')} 入库`
                           : '入库时间未知'}
@@ -390,7 +418,7 @@ export function CandidateFormDialog({
                   ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               {lockedJobId
                 ? '已从职位发起入库，候选人将绑定该职位'
                 : '候选人入库必须绑定职位；职位关闭或招聘定论后绑定自动过期'}
@@ -522,7 +550,7 @@ export function CandidateFormDialog({
                   }
                 }}
               />
-              <Button type="button" variant="outline" onClick={addSkill}>
+              <Button type="button" onClick={addSkill}>
                 添加
               </Button>
             </div>
@@ -561,7 +589,7 @@ export function CandidateFormDialog({
           </div>
 
           <div className="border-t pt-4 mt-2">
-            <h4 className="font-medium mb-3 text-sm text-gray-600">
+            <h4 className="font-medium mb-3 text-sm text-muted-foreground">
               匹配评分信息（用于智能匹配）
             </h4>
             <div className="grid grid-cols-2 gap-4">
@@ -690,7 +718,7 @@ export function CandidateFormDialog({
                     }))
                   }
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   过去3年平均每年跳槽次数，用于稳定性评估
                 </p>
               </div>
@@ -977,7 +1005,7 @@ export function CandidateFormDialog({
                   </>
                 )}
               </div>
-              <div className="rounded-md border bg-white p-3 text-xs leading-5 text-slate-600">
+              <div className="rounded-md border bg-card p-3 text-xs leading-5 text-slate-600">
                 <p className="font-medium text-slate-800">
                   告知文本版本：{AUTHORIZATION_NOTICE_VERSION}
                 </p>
@@ -1012,12 +1040,11 @@ export function CandidateFormDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button variant="ghost" onClick={() => setOpen(false)}>
             取消
           </Button>
           <Button
             onClick={handleSubmit}
-            className="bg-blue-600 hover:bg-blue-700"
           >
             添加
           </Button>
@@ -1027,17 +1054,15 @@ export function CandidateFormDialog({
   );
 }
 
-export function CandidateDetailDialog({
+export function CandidateDetailPanel({
   candidate,
   matchRecord,
-  open,
-  onOpenChange,
+  onBack,
   incompleteHint = false,
 }: {
   candidate: Candidate | null;
   matchRecord: MatchRecord | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onBack?: () => void;
   incompleteHint?: boolean;
 }) {
   const { reloadMatchRecords, jobs } = useWorkspaceData();
@@ -1055,10 +1080,19 @@ export function CandidateDetailDialog({
   >('idle');
   const [resumeFileHtml, setResumeFileHtml] = useState<string | null>(null);
   const [resumeFileText, setResumeFileText] = useState<string | null>(null);
+  const [resumeFileReloadToken, setResumeFileReloadToken] = useState(0);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const resumeFileInputRef = useRef<HTMLInputElement>(null);
+  const [resumeSummary, setResumeSummary] = useState<ResumeStructure | null>(null);
+  const [resumeSummaryState, setResumeSummaryState] = useState<
+    'idle' | 'loading' | 'ready' | 'unavailable' | 'generating'
+  >('idle');
+  const [canGenerateResumeSummary, setCanGenerateResumeSummary] = useState(false);
+  const [resumeSummaryProgress, setResumeSummaryProgress] = useState<string[]>([]);
 
   // 打开详情时拉取原始简历文件签名 URL；Word 转 HTML、文本直接读取，PDF 用 iframe 原生渲染
   useEffect(() => {
-    if (!open || !candidate) {
+    if (!candidate) {
       setResumeFileState('idle');
       return;
     }
@@ -1106,7 +1140,131 @@ export function CandidateDetailDialog({
     return () => {
       active = false;
     };
-  }, [open, candidate]);
+  }, [candidate, resumeFileReloadToken]);
+
+  // 简历摘要：优先读取已落库的结构化缓存；无缓存则展示原文 + 「AI生成摘要」按钮
+  useEffect(() => {
+    if (!candidate?.resume_text) {
+      setResumeSummary(null);
+      setResumeSummaryState('idle');
+      setCanGenerateResumeSummary(false);
+      return;
+    }
+    let active = true;
+    setResumeSummary(null);
+    setResumeSummaryState('loading');
+    setCanGenerateResumeSummary(false);
+    setResumeSummaryProgress([]);
+    void (async () => {
+      try {
+        const response = await authFetch(
+          `/api/candidates/${candidate.id}/resume-summary`,
+        );
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || '读取简历摘要失败');
+        }
+        if (!active) return;
+        const data = result.data as {
+          structure: ResumeStructure | null;
+          canGenerate: boolean;
+        };
+        setCanGenerateResumeSummary(data.canGenerate);
+        if (data.structure) {
+          setResumeSummary(data.structure);
+          setResumeSummaryState('ready');
+        } else {
+          setResumeSummaryState('unavailable');
+        }
+      } catch {
+        if (active) setResumeSummaryState('unavailable');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [candidate?.id, candidate?.resume_text]);
+
+  // 手动触发 AI 生成结构化摘要：NDJSON 流式回传处理过程，done 后已落库并渲染卡片
+  async function handleGenerateResumeSummary() {
+    if (!candidate) return;
+    setResumeSummaryState('generating');
+    setResumeSummaryProgress([]);
+    try {
+      const response = await authFetch(
+        `/api/candidates/${candidate.id}/resume-summary`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+      );
+      if (!response.ok) {
+        const result: { error?: string } = await response.json().catch(() => null);
+        throw new Error(result?.error || '生成结构化摘要失败');
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('生成结构化摘要失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const outcome: { data?: ResumeStructure; error?: string } = {};
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: {
+          type?: string;
+          message?: string;
+          data?: ResumeStructure;
+          error?: string;
+        } = JSON.parse(line);
+        const message = event.message;
+        if (event.type === 'progress' && message) {
+          setResumeSummaryProgress((previous) => [...previous, message]);
+        } else if (event.type === 'done' && event.data) {
+          outcome.data = event.data;
+        } else if (event.type === 'error') {
+          outcome.error = event.error || '生成结构化摘要失败';
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+      if (outcome.error) throw new Error(outcome.error);
+      if (!outcome.data) throw new Error('生成结构化摘要失败');
+      setResumeSummary(outcome.data);
+      setResumeSummaryProgress([]);
+      setResumeSummaryState('ready');
+    } catch (error) {
+      setResumeSummaryState(resumeSummary ? 'ready' : 'unavailable');
+      toast.error(error instanceof Error ? error.message : '生成结构化摘要失败');
+    }
+  }
+
+  // 存量候选人补传原始简历文件：选中即上传，成功后原地刷新出原件预览
+  async function handleResumeFileUpload(
+    event: ChangeEvent<HTMLInputElement>,
+  ): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !candidate) return;
+    setResumeUploading(true);
+    try {
+      await uploadCandidateResumeFile(candidate.id, file);
+      toast.success('原始简历已保存');
+      setResumeFileReloadToken((token) => token + 1);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : '原始简历文件保存失败',
+      );
+    } finally {
+      setResumeUploading(false);
+    }
+  }
 
   async function handleDecisionRight(
     action: 'request_explanation' | 'object_to_automated_decision',
@@ -1162,25 +1320,36 @@ export function CandidateDetailDialog({
     : undefined;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>候选人详情</DialogTitle>
-        </DialogHeader>
+    <div className="rounded-xl border bg-card">
+      <div className="flex items-center justify-between gap-3 border-b px-6 py-4">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-lg font-semibold">候选人详情</h2>
+          {candidate && (
+            <span className="text-sm text-muted-foreground">{candidate.name}</span>
+          )}
+        </div>
+        {onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-1.5" />
+            返回列表
+          </Button>
+        )}
+      </div>
+      <div className="p-6">
         {incompleteHint && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
             部分资料需到候选人库查看
           </div>
         )}
         {candidate && (
-          <div className="space-y-4 py-4">
+          <div className="space-y-4">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
                 {candidate.name[0]}
               </div>
               <div>
                 <h3 className="text-xl font-bold">{candidate.name}</h3>
-                <p className="text-gray-500">{candidate.current_position}</p>
+                <p className="text-muted-foreground">{candidate.current_position}</p>
               </div>
             </div>
             <div className="rounded-md border border-blue-100 bg-blue-50/50 px-3 py-2 text-xs space-y-1 text-slate-700">
@@ -1200,29 +1369,29 @@ export function CandidateDetailDialog({
             <Separator />
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div className="flex items-center gap-2">
-                <Mail className="h-4 w-4 text-gray-400" />
+                <Mail className="h-4 w-4 text-muted-foreground" />
                 <span>{candidate.email || '未填写'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Phone className="h-4 w-4 text-gray-400" />
+                <Phone className="h-4 w-4 text-muted-foreground" />
                 <span>{candidate.phone || '未填写'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-gray-400" />
+                <Building2 className="h-4 w-4 text-muted-foreground" />
                 <span>{candidate.current_company || '未知'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Briefcase className="h-4 w-4 text-gray-400" />
+                <Briefcase className="h-4 w-4 text-muted-foreground" />
                 <span>{candidate.experience_years}年经验</span>
               </div>
               <div className="flex items-center gap-2">
-                <GraduationCap className="h-4 w-4 text-gray-400" />
+                <GraduationCap className="h-4 w-4 text-muted-foreground" />
                 <span>{candidate.education || '未知'}</span>
               </div>
             </div>
             {candidate.skills && candidate.skills.length > 0 && (
               <div>
-                <p className="text-sm text-gray-500 mb-2">技能标签</p>
+                <p className="text-sm text-muted-foreground mb-2">技能标签</p>
                 <div className="flex flex-wrap gap-2">
                   {candidate.skills.map((skill) => (
                     <Badge key={skill} variant="secondary">
@@ -1232,86 +1401,12 @@ export function CandidateDetailDialog({
                 </div>
               </div>
             )}
-            {candidate.authorization && (
-              <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50/40 p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-slate-900">授权证据链</p>
-                  <Badge
-                    variant={
-                      candidate.authorization.evidence_status === 'verified'
-                        ? 'secondary'
-                        : 'destructive'
-                    }
-                  >
-                    {candidate.authorization.evidence_status === 'verified'
-                      ? '已核验'
-                      : '历史未核验'}
-                  </Badge>
-                </div>
-                <p>
-                  来源：
-                  {candidate.authorization.source_type
-                    ? AUTHORIZATION_SOURCE_LABELS[
-                        candidate.authorization.source_type
-                      ] ?? candidate.authorization.source_type
-                    : '未记录'}
-                  {candidate.authorization.source_reference
-                    ? ` · ${candidate.authorization.source_reference}`
-                    : ''}
-                </p>
-                <p>
-                  证明材料：
-                  {candidate.authorization.proof_type || '未记录'}
-                  {candidate.authorization.proof_reference
-                    ? ` · ${candidate.authorization.proof_reference}`
-                    : ''}
-                </p>
-                <p>
-                  告知版本：
-                  {candidate.authorization.notice_version || '未记录'}
-                </p>
-                <p>
-                  处理期限：
-                  {candidate.authorization.processing_expires_at
-                    ? new Date(
-                        candidate.authorization.processing_expires_at,
-                      ).toLocaleString('zh-CN')
-                    : '未记录'}
-                </p>
-                <p>
-                  外部处理方：
-                  {candidate.authorization.external_processors?.join('；')
-                    || '未记录'}
-                </p>
-                <p>
-                  自动化决策：
-                  {candidate.authorization.automated_decision_objected_at
-                    ? '候选人已拒绝，仅允许人工评估'
-                    : candidate.authorization
-                        .automated_decision_preference === 'assistive'
-                      ? '自动化辅助，最终人工决定'
-                      : '仅人工评估'}
-                </p>
-                {candidate.authorization.impact_assessment_reference && (
-                  <p>
-                    影响评估：
-                    {candidate.authorization.impact_assessment_reference}
-                  </p>
-                )}
-                {candidate.authorization.evidence_sha256 && (
-                  <p className="font-mono text-xs text-slate-500">
-                    证据摘要：
-                    {candidate.authorization.evidence_sha256}
-                  </p>
-                )}
-              </div>
-            )}
             {resumeFileState === 'ready' && resumeFile && (
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-sm text-gray-500">原始简历</p>
+                  <p className="text-sm text-muted-foreground">原始简历</p>
                   {resumeFile.name && (
-                    <span className="truncate text-xs text-gray-400">
+                    <span className="truncate text-xs text-muted-foreground">
                       {resumeFile.name}
                     </span>
                   )}
@@ -1321,23 +1416,53 @@ export function CandidateDetailDialog({
                     title="原始简历"
                     sandbox=""
                     srcDoc={resumeFileHtml}
-                    className="h-96 w-full rounded-lg border bg-white"
+                    className="h-96 w-full rounded-lg border bg-card"
                   />
                 ) : resumeFileText !== null ? (
-                  <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-sm">
+                  <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm">
                     {resumeFileText}
                   </pre>
                 ) : (
                   <iframe
                     title="原始简历"
                     src={resumeFile.url}
-                    className="h-96 w-full rounded-lg border"
+                    className="h-[32rem] w-full rounded-lg border"
                   />
                 )}
               </div>
             )}
             {resumeFileState === 'loading' && (
-              <p className="text-sm text-gray-400">正在加载原始简历…</p>
+              <p className="text-sm text-muted-foreground">正在加载原始简历…</p>
+            )}
+            {resumeFileState === 'none' && (
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-muted-foreground">原始简历</p>
+                  <input
+                    ref={resumeFileInputRef}
+                    type="file"
+                    accept=".pdf,.docx,.txt,.md"
+                    className="hidden"
+                    onChange={handleResumeFileUpload}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={resumeUploading}
+                    onClick={() => resumeFileInputRef.current?.click()}
+                  >
+                    {resumeUploading ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    {resumeUploading ? '正在上传…' : '上传原文件'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  支持 PDF / Word / 文本，上传后可直接预览原件
+                </p>
+              </div>
             )}
             {resumeFileState === 'error' && (
               <p className="text-sm text-red-500">
@@ -1345,19 +1470,250 @@ export function CandidateDetailDialog({
               </p>
             )}
             {candidate.resume_text && (
-              <div>
-                <p className="text-sm text-gray-500 mb-2">简历摘要</p>
-                <p className="text-sm bg-gray-50 p-3 rounded-lg">
-                  {candidate.resume_text}
-                </p>
-              </div>
+              <details open={!resumeFile}>
+                <summary className="cursor-pointer select-none text-sm text-muted-foreground">
+                  简历摘要
+                </summary>
+                {resumeSummaryState === 'loading' && (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    正在读取简历摘要…
+                  </div>
+                )}
+                {resumeSummaryState === 'generating' && (
+                  <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                    <div className="flex items-center gap-2 text-sm text-blue-700">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      正在生成结构化摘要…
+                    </div>
+                    <ul className="mt-2 space-y-1">
+                      {resumeSummaryProgress.map((message, index) => (
+                        <li key={index} className="text-xs text-muted-foreground">
+                          {message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {resumeSummaryState === 'ready' && resumeSummary && (
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-blue-700">候选人定位</p>
+                        {canGenerateResumeSummary && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => void handleGenerateResumeSummary()}
+                          >
+                            AI生成摘要
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-sm leading-6">{resumeSummary.summary}</p>
+                    </div>
+                    {resumeSummary.skills.length > 0 && (
+                      <div className="rounded-lg border bg-card p-3">
+                        <p className="mb-2 text-xs font-medium text-muted-foreground">技能</p>
+                        <div className="flex flex-wrap gap-2">
+                          {resumeSummary.skills.map((skill) => (
+                            <Badge key={skill} variant="secondary">
+                              {skill}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {resumeSummary.experience.length > 0 && (
+                      <div className="rounded-lg border bg-card p-3">
+                        <p className="mb-2 text-xs font-medium text-muted-foreground">
+                          工作 / 项目经历
+                        </p>
+                        <div className="space-y-2">
+                          {resumeSummary.experience.map((item, index) => (
+                            <div
+                              key={`${item.title}-${index}`}
+                              className="rounded-md bg-muted/50 p-2.5"
+                            >
+                              <p className="text-sm font-medium">{item.title}</p>
+                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                                {item.detail}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {resumeSummary.highlights.length > 0 && (
+                      <div className="rounded-lg border bg-card p-3">
+                        <p className="mb-2 text-xs font-medium text-muted-foreground">亮点</p>
+                        <ul className="space-y-1.5">
+                          {resumeSummary.highlights.map((highlight, index) => (
+                            <li key={index} className="flex gap-2 text-sm leading-6">
+                              <span className="text-blue-500">•</span>
+                              <span>{highlight}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground">
+                        查看原文
+                      </summary>
+                      <p className="mt-2 whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm leading-6">
+                        {candidate.resume_text}
+                      </p>
+                    </details>
+                  </div>
+                )}
+                {(resumeSummaryState === 'unavailable' ||
+                  resumeSummaryState === 'idle') && (
+                  <div className="mt-2 space-y-2">
+                    {candidate.resume_text
+                      .split(/\n{2,}/)
+                      .map((paragraph, index) => (
+                        <p
+                          key={index}
+                          className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm leading-6"
+                        >
+                          {paragraph.trim()}
+                        </p>
+                      ))}
+                    {canGenerateResumeSummary && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleGenerateResumeSummary()}
+                      >
+                        AI生成摘要
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </details>
             )}
-            <Separator />
-            <div className="space-y-3">
+            {candidate.authorization && (
+              <>
+                <Separator />
+                <Collapsible className="rounded-lg border border-blue-200 bg-blue-50/40">
+                  <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-medium text-slate-900">
+                        授权与合规
+                      </span>
+                      <Badge
+                        variant={
+                          candidate.authorization.evidence_status === 'verified'
+                            ? 'secondary'
+                            : 'destructive'
+                        }
+                      >
+                        {candidate.authorization.evidence_status === 'verified'
+                          ? '已核验'
+                          : '历史未核验'}
+                      </Badge>
+                      <span className="text-xs text-slate-600">
+                        {candidate.authorization.automated_decision_objected_at
+                          ? '候选人已拒绝自动化'
+                          : candidate.authorization
+                              .automated_decision_preference === 'assistive'
+                            ? '自动化辅助 · 人工决定'
+                            : '仅人工评估'}
+                      </span>
+                      {candidate.authorization.processing_expires_at && (
+                        <span className="text-xs text-slate-400">
+                          有效期至
+                          {new Date(
+                            candidate.authorization.processing_expires_at,
+                          ).toLocaleDateString('zh-CN')}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-1.5 border-t border-blue-200/70 px-3 py-3 text-xs leading-5 text-slate-600">
+                      <p>
+                        来源：
+                        {candidate.authorization.source_type
+                          ? AUTHORIZATION_SOURCE_LABELS[
+                              candidate.authorization.source_type
+                            ] ?? candidate.authorization.source_type
+                          : '未记录'}
+                        {candidate.authorization.source_reference && (
+                          <>
+                            {' · '}
+                            <CopyableReference
+                              value={candidate.authorization.source_reference}
+                            />
+                          </>
+                        )}
+                      </p>
+                      <p>
+                        证明材料：
+                        {candidate.authorization.proof_type || '未记录'}
+                        {candidate.authorization.proof_reference && (
+                          <>
+                            {' · '}
+                            <CopyableReference
+                              value={candidate.authorization.proof_reference}
+                            />
+                          </>
+                        )}
+                      </p>
+                      <p>
+                        告知版本：
+                        {candidate.authorization.notice_version || '未记录'}
+                      </p>
+                      <p>
+                        处理期限：
+                        {candidate.authorization.processing_expires_at
+                          ? new Date(
+                              candidate.authorization.processing_expires_at,
+                            ).toLocaleDateString('zh-CN')
+                          : '未记录'}
+                      </p>
+                      <p>
+                        外部处理方：
+                        {candidate.authorization.external_processors?.join('；')
+                          || '未记录'}
+                      </p>
+                      <p>
+                        自动化决策：
+                        {candidate.authorization.automated_decision_objected_at
+                          ? '候选人已拒绝，仅允许人工评估'
+                          : candidate.authorization
+                              .automated_decision_preference === 'assistive'
+                            ? '自动化辅助，最终人工决定'
+                            : '仅人工评估'}
+                      </p>
+                      {candidate.authorization.impact_assessment_reference && (
+                        <p className="flex flex-wrap items-center">
+                          影响评估：
+                          <CopyableReference
+                            value={
+                              candidate.authorization
+                                .impact_assessment_reference
+                            }
+                          />
+                        </p>
+                      )}
+                      {candidate.authorization.evidence_sha256 && (
+                        <p className="flex flex-wrap items-center">
+                          证据摘要：
+                          <CopyableReference
+                            value={candidate.authorization.evidence_sha256}
+                          />
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-3 border-t border-blue-200/70 px-3 py-3">
               <div>
                 <p className="font-medium text-slate-900">自动化决策权利</p>
                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                  根据候选人的申请提供匹配说明，或记录其拒绝自动化处理的选择。两项操作都会写入不含姓名、邮箱的审计事件。
+                  候选人来函要求说明或拒绝自动化评估时在此登记，操作会记入审计日志。
                 </p>
               </div>
               <div>
@@ -1385,7 +1741,6 @@ export function CandidateDetailDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  className="border-amber-300 text-amber-700 hover:bg-amber-50"
                   disabled={rightsLoading}
                   onClick={() =>
                     handleDecisionRight('object_to_automated_decision')
@@ -1423,14 +1778,15 @@ export function CandidateDetailDialog({
                   )}
                 </div>
               )}
-            </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </>
+            )}
           </div>
         )}
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
@@ -1454,7 +1810,7 @@ export function RevokeCandidateDialog({
       );
       const result = await response.json();
       if (result.success) {
-        toast.success('授权已撤回，候选人信息已脱敏处理');
+        toast.success('授权已撤回，候选人个人信息已删除');
         await reloadCandidates();
       } else {
         toast.error(result.error || '撤回失败');
@@ -1475,279 +1831,18 @@ export function RevokeCandidateDialog({
             确认撤回授权
           </DialogTitle>
           <DialogDescription>
-            确定要撤回{candidate?.name}
-            的简历授权吗？撤回后将脱敏处理其个人信息，此操作不可撤销。
+            确定要撤回{candidate?.name}的简历授权吗？撤回后，{candidate?.name}
+            的姓名、联系方式、简历等个人信息会被删除且无法恢复，只保留看不出身份的招聘统计数字。
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
             取消
           </Button>
           <Button variant="destructive" onClick={handleRevoke}>
             确认撤回
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * 简历快速导入弹窗：HR 拖入招聘平台下载的简历文件后：
- * 浏览器端解析文本 → 字段提取 → 极简确认（姓名 + 关联职位）→ 一键入库。
- * 授权证据由服务端默认登记（招聘平台授权记录、保留 1 年、人工复核优先）。
- */
-export function QuickImportDialog({
-  open,
-  onOpenChange,
-  file,
-  onImported,
-  lockedJobId,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  file: File | null;
-  onImported: () => Promise<void>;
-  lockedJobId?: string | null;
-}) {
-  const { jobs } = useWorkspaceData();
-  const [phase, setPhase] = useState<'parsing' | 'confirm' | 'error'>('parsing');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [fullText, setFullText] = useState('');
-  const [name, setName] = useState('');
-  const [jobId, setJobId] = useState('');
-  const [extracted, setExtracted] = useState<Record<string, unknown>>({});
-  const [duplicates, setDuplicates] = useState<DuplicateCandidateHint[]>([]);
-  const [importing, setImporting] = useState(false);
-
-  // 文件变化即开始解析：浏览器端提取文本 → 调提取接口 → 进入极简确认
-  useEffect(() => {
-    if (!file || !open) return;
-    let active = true;
-    setPhase('parsing');
-    setErrorMessage('');
-    setDuplicates([]);
-    setExtracted({});
-    setFullText('');
-    // 预选职位：从职位页发起时锁定该职位，否则取最近操作的职位
-    setJobId(lockedJobId ?? sessionStorage.getItem('last_job_id') ?? '');
-    void (async () => {
-      try {
-        const text = await extractResumeTextFromFile(file);
-        if (text.trim().length < 10) {
-          throw new Error('未能从文件中提取到有效文本（可能是扫描件图片型 PDF）');
-        }
-        const response = await authFetch('/api/candidates/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        });
-        const result = await response.json();
-        if (!result.success) throw new Error(result.error || '字段提取失败');
-        if (!active) return;
-        const fields = (result.data?.extracted ?? {}) as Record<string, unknown>;
-        setExtracted(fields);
-        setFullText(text);
-        setName(
-          typeof fields.name === 'string' && fields.name ? fields.name : '',
-        );
-        setDuplicates(
-          Array.isArray(result.data?.duplicates)
-            ? (result.data.duplicates as DuplicateCandidateHint[])
-            : [],
-        );
-        setPhase('confirm');
-      } catch (error) {
-        if (active) {
-          setErrorMessage(
-            error instanceof Error ? error.message : '简历解析失败',
-          );
-          setPhase('error');
-        }
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [file, open, lockedJobId]);
-
-  function stringField(key: string): string {
-    const value = extracted[key];
-    return typeof value === 'string' ? value : '';
-  }
-
-  function stringArrayField(key: string): string[] {
-    const value = extracted[key];
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === 'string')
-      : [];
-  }
-
-  async function handleImport() {
-    if (!name.trim()) {
-      toast.error('请确认候选人姓名');
-      return;
-    }
-    if (!jobId) {
-      toast.error('请选择关联职位');
-      return;
-    }
-    setImporting(true);
-    try {
-      const response = await authFetch('/api/candidates/quick-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          email: stringField('email') || null,
-          phone: stringField('phone') || null,
-          source_job_id: jobId,
-          skills: stringArrayField('skills'),
-          experience_years:
-            typeof extracted.experience_years === 'number'
-              ? (extracted.experience_years as number)
-              : null,
-          education: stringField('education') || null,
-          current_company: stringField('current_company') || null,
-          current_position: stringField('current_position') || null,
-          current_city: stringField('current_city') || null,
-          preferred_locations: stringArrayField('preferred_locations'),
-          salary_expectation: stringField('salary_expectation') || null,
-          resume_text: fullText,
-        }),
-      });
-      const result = await response.json();
-      if (!result.success) {
-        toast.error(result.error || '导入失败');
-        return;
-      }
-      // 入库成功后保存原始简历文件，供候选人详情展示（失败不影响入库结果）
-      const candidateId = result.data?.id;
-      if (typeof candidateId === 'string' && file) {
-        try {
-          await uploadCandidateResumeFile(candidateId, file);
-        } catch {
-          toast.warning(
-            '候选人已入库，但原始简历文件保存失败，详情页将仅显示简历摘要',
-          );
-        }
-      }
-      toast.success('候选人已导入并绑定职位');
-      onOpenChange(false);
-      await onImported();
-    } catch {
-      toast.error('导入失败，请重试');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>简历快速导入</DialogTitle>
-          <DialogDescription>
-            解析简历文件，确认姓名与职位后一键入库
-          </DialogDescription>
-        </DialogHeader>
-
-        {phase === 'parsing' && (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-gray-500">
-            <LoaderCircle className="h-8 w-8 animate-spin text-blue-500" />
-            正在解析简历并提取字段...
-          </div>
-        )}
-
-        {phase === 'error' && (
-          <div className="space-y-4 py-4">
-            <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>解析失败</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                关闭
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-
-        {phase === 'confirm' && (
-          <div className="space-y-4 py-4">
-            {duplicates.length > 0 && (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>该候选人可能已存在</AlertTitle>
-                <AlertDescription className="space-y-1 text-xs">
-                  {duplicates.map((item) => (
-                    <p key={item.id}>
-                      {item.name}
-                      {item.source_job_title
-                        ? `（曾绑定：${item.source_job_title}${item.source_job_binding_status === 'expired' ? '，已过期' : ''}）`
-                        : ''}
-                    </p>
-                  ))}
-                </AlertDescription>
-              </Alert>
-            )}
-            <div className="grid gap-4">
-              <div>
-                <Label htmlFor="quick_import_name">姓名 *</Label>
-                <Input
-                  id="quick_import_name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="提取到的姓名，可修改"
-                />
-              </div>
-              <div>
-                <Label>关联职位 *</Label>
-                <Select
-                  value={jobId}
-                  onValueChange={setJobId}
-                  disabled={Boolean(lockedJobId)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择候选人应聘的职位" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {jobs
-                      .filter((job) => job.status === 'active')
-                      .map((job) => (
-                        <SelectItem key={job.id} value={job.id}>
-                          {job.title}
-                          {job.department ? ` · ${job.department}` : ''}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                {lockedJobId && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    已从职位发起导入，候选人将绑定该职位
-                  </p>
-                )}
-              </div>
-            </div>
-            <p className="text-xs leading-5 text-gray-400">
-              入库后将自动登记「招聘平台授权记录」：即刻生效、默认保留 1
-              年、人工复核优先；姓名与联系方式已加密存储，证明材料可在候选人详情中补充。
-            </p>
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                取消
-              </Button>
-              <Button
-                onClick={handleImport}
-                disabled={importing}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {importing ? '导入中...' : '一键入库'}
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );

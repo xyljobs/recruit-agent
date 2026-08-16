@@ -90,19 +90,22 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
 JD内容：
 `;
 
-/** 解析流空闲超时：超过该时间未收到新分片即中止，避免请求永久挂起 */
+/** 快速模式流空闲超时：超过该时间未收到新分片即中止，避免请求永久挂起 */
 const PARSE_STREAM_IDLE_TIMEOUT_MS = 30_000;
+/** 深度思考模式流空闲超时：开思考实测首字前推理可达 2 分钟，保留 5 分钟余量避免成功请求被误杀 */
+const PARSE_DEEP_IDLE_TIMEOUT_MS = 300_000;
 
 export async function POST(request: NextRequest) {
   try {
     const startedAt = Date.now();
     const { supabase, user } = await getTenantRequestContext(request);
     await enforceRateLimit(supabase, RATE_LIMITS.jdParse);
-    const { jdContent, jobId } = await parseLimitedJson(
+    const { jdContent, jobId, deepThinking } = await parseLimitedJson(
       request,
       jdParseBodySchema,
       JD_JSON_BODY_LIMIT,
     );
+    const useDeepThinking = deepThinking === true;
 
     const aiGateway = await createTenantAiExecutionGateway(
       supabase,
@@ -128,10 +131,10 @@ export async function POST(request: NextRequest) {
             aiGateway.stream([{ role: 'user' as const, content: prompt }], {
               model: aiGateway.policy.modelName ?? undefined,
               temperature: 0.3,
-              // JD 解析是结构化抽取任务，关闭思考模型的隐式推理，避免分钟级首 token 延迟
-              enableThinking: false,
+              // 深度思考：显式开启思考模型隐式推理；快速模式：关闭思考避免分钟级首 token 延迟
+              enableThinking: useDeepThinking,
             }),
-            PARSE_STREAM_IDLE_TIMEOUT_MS,
+            useDeepThinking ? PARSE_DEEP_IDLE_TIMEOUT_MS : PARSE_STREAM_IDLE_TIMEOUT_MS,
           );
           for await (const chunk of chunks) {
             if (!chunk.content) continue;

@@ -15,9 +15,10 @@ const focusAreaSchema = z.strictObject({
 });
 
 const commonQuestionSchema = z.strictObject({
-  bank_id: z.string().trim().min(1).max(64),
+  bank_id: z.string().trim().min(1).max(64).optional(),
   question: z.string().trim().min(1).max(500),
   dimension: z.string().trim().min(1).max(100),
+  answer: z.string().max(5000).optional(),
 });
 
 const targetedQuestionSchema = z.strictObject({
@@ -27,6 +28,7 @@ const targetedQuestionSchema = z.strictObject({
   expected_signals: z.array(z.string().trim().min(1).max(200)).max(3),
   probe_followups: z.array(z.string().trim().min(1).max(200)).max(2),
   scoring_anchors: z.array(z.string().trim().min(1).max(200)).max(3),
+  answer: z.string().max(5000).optional(),
 });
 
 const interviewLoopSchema = z.strictObject({
@@ -46,6 +48,17 @@ export const interviewGuideContentSchema = z.strictObject({
 });
 
 export type InterviewGuideContent = z.infer<typeof interviewGuideContentSchema>;
+
+/**
+ * 面试提纲题目部分 schema（供 HR 编辑保存）：common_questions 与
+ * targeted_questions 都允许人工增删改与记录答案，因此不再强制专项题下限。
+ */
+export const interviewGuideQuestionsSchema = z.strictObject({
+  common_questions: z.array(commonQuestionSchema).max(20),
+  targeted_questions: z.array(targetedQuestionSchema).max(20),
+});
+
+export type InterviewGuideQuestions = z.infer<typeof interviewGuideQuestionsSchema>;
 
 /** 禁问话题：题库录入与 AI 产出都必须过这道校验 */
 export const PROHIBITED_INTERVIEW_TOPICS = [
@@ -71,6 +84,8 @@ const PROHIBITED_DISPLAY_TOPICS = [
   '性取向',
   '家庭财产',
 ] as const;
+
+export { PROHIBITED_DISPLAY_TOPICS };
 
 export function assertNoProhibitedTopic(text: string): void {
   const hit = PROHIBITED_INTERVIEW_TOPICS.find(topic => text.includes(topic));
@@ -174,7 +189,7 @@ export function buildRulesOnlyInterviewGuide(
   const targetedQuestions = trimmed.map((question) => ({
     question,
     dimension: resolveQuestionDimension(question, focusAreas),
-    origin: resolveQuestionOrigin(question, input),
+    origin: resolveQuestionOrigin(question),
     expected_signals: [],
     probe_followups: [],
     scoring_anchors: [],
@@ -269,7 +284,6 @@ function resolveQuestionDimension(
 
 function resolveQuestionOrigin(
   question: string,
-  input: InterviewGuideSourceInput,
 ): 'evidence_gap' | 'depth_check' | 'boundary_risk' {
   if (question.startsWith('请补充说明：')) return 'evidence_gap';
   const boundaryTemplates = Object.values(BOUNDARY_QUESTION_TEMPLATES);
@@ -277,11 +291,108 @@ function resolveQuestionOrigin(
   return 'depth_check';
 }
 
+/**
+ * 模型输出的宽松 schema：LLM 常返回未知字段、字符串数字、null、带单位数值等，
+ * 这里用 z.object（默认 strip 未知字段）+ preprocess 逐字段容错，避免整体误报。
+ * 严格 schema（interviewGuideContentSchema）仍用于 rules_only 构建与编辑保存。
+ */
+
+/** 布尔容错：字符串 true/false/是/否 也接受；模型偶发把「需核实的内容」描述成字符串，
+ * 语义即必须核实，按 true 保守处理（缺失字段同理，宁多核实一项不漏核） */
+const modelBooleanSchema = z.preprocess(
+  value => {
+    if (value === true || value === 'true' || value === 'TRUE' || value === '是') return true;
+    if (value === false || value === 'false' || value === 'FALSE' || value === '否') return false;
+    return true;
+  },
+  z.boolean(),
+);
+
+/** origin 容错：非法取值统一降级为 depth_check */
+const modelOriginSchema = z.preprocess(
+  value => (
+    ['evidence_gap', 'depth_check', 'boundary_risk', 'resume_probe'].includes(value as string)
+      ? value
+      : 'depth_check'
+  ),
+  targetedQuestionSchema.shape.origin,
+);
+
+/** 字符串容错：数字转字符串、超长截断，再走 trim/min/max 校验 */
+function modelString(maxLen: number) {
+  return z.preprocess(
+    value => (
+      typeof value === 'string'
+        ? value.slice(0, maxLen)
+        : typeof value === 'number'
+          ? String(value)
+          : value
+    ),
+    z.string().trim().min(1).max(maxLen),
+  );
+}
+
+/** 字符串数组容错：null/非数组→空数组，过滤非字符串与空串项，超长截断 */
+function modelStringArray(maxLen: number, maxItems: number) {
+  return z.preprocess(
+    value => (
+      Array.isArray(value)
+        ? value
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .map(item => item.slice(0, maxLen))
+        : []
+    ),
+    z.array(z.string().trim().min(1).max(maxLen)).max(maxItems),
+  );
+}
+
+/** 从字符串提取首个整数（容错「45分钟」这类带单位的值） */
+function extractInt(value: unknown): unknown {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const match = value.match(/\d+/);
+    return match ? Number(match[0]) : value;
+  }
+  return value;
+}
+
+const modelFocusAreaSchema = z.object({
+  dimension: modelString(100),
+  why: modelString(500),
+  must_verify: modelBooleanSchema,
+});
+const modelCommonQuestionSchema = z.object({ ...commonQuestionSchema.shape });
+const modelTargetedQuestionSchema = z.object({
+  question: modelString(500),
+  dimension: modelString(100),
+  origin: modelOriginSchema,
+  expected_signals: modelStringArray(200, 3),
+  probe_followups: modelStringArray(200, 2),
+  scoring_anchors: modelStringArray(200, 3),
+});
+const modelInterviewLoopSchema = z.object({
+  round: z.preprocess(extractInt, z.number().int().min(1).max(5)),
+  focus: modelString(300),
+  minutes: z.preprocess(extractInt, z.number().int().min(5).max(120)),
+  interviewer_role: modelString(100),
+});
+const modelInterviewGuideContentSchema = z.object({
+  focus_areas: z.array(modelFocusAreaSchema).max(6).catch([]),
+  common_questions: z.array(modelCommonQuestionSchema).max(4),
+  targeted_questions: z.array(modelTargetedQuestionSchema).min(1).max(10),
+  red_flags_to_check: modelStringArray(500, 5),
+  interview_loop: z.array(modelInterviewLoopSchema).max(3).catch([]),
+  prohibited_topics: modelStringArray(100, 20),
+});
+
 /** 模型输出 JSON 提取与校验（公共题字段会在 API 层被题库原文覆盖） */
 export function parseModelInterviewGuide(value: string): InterviewGuideContent {
-  return interviewGuideContentSchema.parse(
-    JSON.parse(extractJsonObject(value)),
-  );
+  const raw = JSON.parse(extractJsonObject(value)) as Record<string, unknown>;
+  if (raw && typeof raw === 'object') {
+    // 公共题原文只来自题库，模型输出一律丢弃，避免结构不一致导致整体失败
+    raw.common_questions = [];
+  }
+  return modelInterviewGuideContentSchema.parse(raw);
 }
 
 /** 题库批量导入：逐行解析「题目 | 考察点 | 期望信号」，错误行不阻断其余行 */

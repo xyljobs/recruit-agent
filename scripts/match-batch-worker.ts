@@ -70,6 +70,35 @@ const persistedShortlistEntrySchema = z.object({
 
 type MatchBatchTask = z.infer<typeof taskSchema>;
 
+type ShortlistProgressStage =
+  | 'reading_job'
+  | 'loading_candidates'
+  | 'scoring'
+  | 'generating_shortlist';
+
+interface ShortlistProgress {
+  stage: ShortlistProgressStage;
+  scored_candidates: number;
+  total_candidates: number;
+}
+
+async function updateShortlistProgress(
+  supabase: SupabaseClient,
+  organizationId: string,
+  shortlistRunId: string | null,
+  progress: ShortlistProgress,
+): Promise<void> {
+  if (!shortlistRunId) return;
+  const { error } = await supabase.rpc('update_shortlist_run_progress', {
+    p_organization_id: organizationId,
+    p_shortlist_run_id: shortlistRunId,
+    p_progress: progress,
+  });
+  if (error) {
+    throw new Error(`更新短名单进度失败: ${error.message}`);
+  }
+}
+
 async function claimTask(supabase: SupabaseClient): Promise<MatchBatchTask | null> {
   const { data, error } = await supabase.rpc('claim_match_batch_task', {
     p_worker_id: WORKER_ID,
@@ -130,6 +159,12 @@ async function processTask(
         },
       );
       if (startRunError) throw new Error(`启动短名单运行失败: ${startRunError.message}`);
+      await updateShortlistProgress(
+        supabase,
+        task.organization_id,
+        shortlistRunId,
+        { stage: 'reading_job', scored_candidates: 0, total_candidates: 0 },
+      );
     }
 
     const requestedCandidateIds = task.candidate_ids
@@ -163,6 +198,14 @@ async function processTask(
     if (candidateError) {
       throw new Error(`查询候选人失败: ${candidateError.message}`);
     }
+
+    const totalCandidates = (candidates || []).length;
+    await updateShortlistProgress(
+      supabase,
+      task.organization_id,
+      shortlistRunId,
+      { stage: 'loading_candidates', scored_candidates: 0, total_candidates: totalCandidates },
+    );
 
     const scoredMatches = (candidates || []).map(candidate => {
       const scoringCandidate = {
@@ -213,7 +256,7 @@ async function processTask(
 
     const recordIdByCandidate = new Map<string, string>();
     if (scoredMatches.length > 0) {
-      for (const match of scoredMatches) {
+      for (const [scoredIndex, match] of scoredMatches.entries()) {
         const record = await saveMatchScoring(
           supabase,
           {
@@ -244,6 +287,16 @@ async function processTask(
           },
         );
         recordIdByCandidate.set(record.candidate_id, record.id);
+        await updateShortlistProgress(
+          supabase,
+          task.organization_id,
+          shortlistRunId,
+          {
+            stage: 'scoring',
+            scored_candidates: scoredIndex + 1,
+            total_candidates: scoredMatches.length,
+          },
+        );
       }
     }
 
@@ -266,6 +319,16 @@ async function processTask(
 
     let matches;
     if (shortlistRunId) {
+      await updateShortlistProgress(
+        supabase,
+        task.organization_id,
+        shortlistRunId,
+        {
+          stage: 'generating_shortlist',
+          scored_candidates: scoredMatches.length,
+          total_candidates: scoredMatches.length,
+        },
+      );
       const rankedEntries = buildBatchShortlistEntries({
         job: job as Record<string, unknown>,
         candidates: scoredMatches.map(match => match.candidate),

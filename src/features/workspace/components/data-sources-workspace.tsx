@@ -27,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { authFetch } from '@/lib/auth-client';
 import type { IntegrationConnection } from '../decision-types';
 import { normalizeIntegrationConnections } from '../lib/decision-ui';
+import { DemoResetCard } from './demo-reset-control';
 
 interface DataBoundary {
   ai_mode?: 'rules_only' | 'private_endpoint' | 'approved_cloud' | string;
@@ -149,7 +150,7 @@ export function DataSourcesWorkspace() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Controlled ingress</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">数据源</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">只接入现有 ATS 或已授权简历来源。这里清楚展示数据去向、模型边界和外部处理方。</p></div>
-        <Button variant="outline" onClick={() => void loadConnections()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新状态</Button>
+        <Button onClick={() => void loadConnections()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新状态</Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -170,7 +171,7 @@ export function DataSourcesWorkspace() {
           {boundary.deployment_mode === 'approved_cloud' && (
             <p className="w-full text-sm text-slate-600">拟批准处理方：{boundary.deployment_processors?.join('、') || '部署未声明，无法启用'}</p>
           )}
-          <Button variant="outline" onClick={() => void setAiPolicy('rules_only')}>使用纯规则</Button>
+          <Button onClick={() => void setAiPolicy('rules_only')}>使用纯规则</Button>
           {boundary.deployment_mode && boundary.deployment_mode !== 'rules_only' && (
             <Button onClick={() => void setAiPolicy(boundary.deployment_mode as 'private_endpoint' | 'approved_cloud')}>
               {boundary.deployment_mode === 'approved_cloud' ? '批准处理方并启用云端' : '批准并启用私有端点'}
@@ -178,6 +179,8 @@ export function DataSourcesWorkspace() {
           )}
         </CardContent>
       </Card>
+
+      <DemoResetCard />
 
       <Card className="border-slate-200 shadow-none">
         <CardHeader><CardTitle>已连接的数据源</CardTitle><CardDescription>管理员可直接导入职位或附带完整授权证据的候选人；每页最多 100 条，实体、映射和游标在同一事务提交。</CardDescription></CardHeader>
@@ -190,7 +193,7 @@ export function DataSourcesWorkspace() {
               <div key={connection.id} className="grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-[auto_1fr_auto] md:items-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">{connection.connection_type === 'csv' || connection.connection_type === 'json' ? <FileJson2 className="h-5 w-5" /> : <Server className="h-5 w-5" />}</div>
                 <div><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-slate-950">{connection.name}</p><Badge variant={connection.enabled ? 'default' : 'secondary'}>{connection.enabled ? '已启用' : '已停用'}</Badge><Badge variant="outline">{sourceLabel(connection.connection_type)}</Badge></div><p className="mt-2 text-xs text-slate-500">上次同步：{formatDate(connection.last_sync_at)}{connection.last_sync_status ? ` · ${connection.last_sync_status}` : ''}</p>{connection.last_sync_error && <p className="mt-1 text-xs text-red-700">{connection.last_sync_error}</p>}</div>
-                <div><input id={`integration-file-${connection.id}`} className="sr-only" type="file" accept=".csv,.json,text/csv,application/json" disabled={!connection.enabled || syncingId === connection.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPage(connection.id, file); event.currentTarget.value = ''; }} /><Button variant="outline" disabled={!connection.enabled || syncingId === connection.id} onClick={() => document.getElementById(`integration-file-${connection.id}`)?.click()}><FileUp className="mr-2 h-4 w-4" />{syncingId === connection.id ? '导入中…' : '导入一页'}</Button></div>
+                <div><input id={`integration-file-${connection.id}`} className="sr-only" type="file" accept=".csv,.json,text/csv,application/json" disabled={!connection.enabled || syncingId === connection.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPage(connection.id, file); event.currentTarget.value = ''; }} /><Button disabled={!connection.enabled || syncingId === connection.id} onClick={() => document.getElementById(`integration-file-${connection.id}`)?.click()}><FileUp className="mr-2 h-4 w-4" />{syncingId === connection.id ? '导入中…' : '导入一页'}</Button></div>
               </div>
             ))}</div>
           )}
@@ -198,8 +201,8 @@ export function DataSourcesWorkspace() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-slate-200 shadow-none"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><FileUp className="h-4 w-4 text-blue-700" />受控文件导入</CardTitle><CardDescription>CSV/JSON 是默认兼容基线，导入前需要确认来源授权。</CardDescription></CardHeader><CardContent><Button variant="outline" disabled={!resumeBatchEnabled} asChild={resumeBatchEnabled}>{resumeBatchEnabled ? <Link href="/resume-batch">进入简历批处理</Link> : <span>需要管理员启用</span>}</Button></CardContent></Card>
-        <Card className="border-slate-200 shadow-none"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Search className="h-4 w-4 text-blue-700" />Boss 兼容工具</CardTitle><CardDescription>仅为一版兼容入口，不属于核心招聘决策流程；不得绕过平台授权或权限。</CardDescription></CardHeader><CardContent><Button variant="outline" disabled={!bossEnabled} asChild={bossEnabled}>{bossEnabled ? <Link href="/boss-search">进入已启用的兼容工具</Link> : <span>需要管理员明确启用</span>}</Button></CardContent></Card>
+        <Card className="border-slate-200 shadow-none"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><FileUp className="h-4 w-4 text-primary" />受控文件导入</CardTitle><CardDescription>CSV/JSON 是默认兼容基线，导入前需要确认来源授权。</CardDescription></CardHeader><CardContent><Button disabled={!resumeBatchEnabled} asChild={resumeBatchEnabled}>{resumeBatchEnabled ? <Link href="/resume-batch">进入简历批处理</Link> : <span>需要管理员启用</span>}</Button></CardContent></Card>
+        <Card className="border-slate-200 shadow-none"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Search className="h-4 w-4 text-primary" />Boss 兼容工具</CardTitle><CardDescription>仅为一版兼容入口，不属于核心招聘决策流程；不得绕过平台授权或权限。</CardDescription></CardHeader><CardContent><Button disabled={!bossEnabled} asChild={bossEnabled}>{bossEnabled ? <Link href="/boss-search">进入已启用的兼容工具</Link> : <span>需要管理员明确启用</span>}</Button></CardContent></Card>
       </div>
 
       <Card className="border-slate-200 bg-slate-950 text-white shadow-none"><CardContent className="grid gap-4 pt-0 md:grid-cols-[auto_1fr]"><LockKeyhole className="h-6 w-6 text-blue-300" /><div><p className="font-medium">数据边界不是一句“私有部署”口号</p><p className="mt-2 text-sm leading-6 text-slate-300">连接密钥应加密保存，候选人授权失效时停止新处理，外部写回先记录人工批准意图，再由独立任务执行。</p></div></CardContent></Card>

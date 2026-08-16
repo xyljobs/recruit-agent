@@ -32,7 +32,6 @@ const MODEL_PROMPT = `你是一位企业招聘人员的沟通准备助手。请�
 JSON 字段：
 - candidate_value_points: string[]，最多6项，仅包含有证据支持的沟通切入点
 - facts_to_verify: string[]，最多8项
-- interview_questions: string[]，最多8项
 - prohibited_claims: string[]，最多8项
 - draft_message: string，供招聘人员审核修改后使用
 
@@ -150,81 +149,126 @@ export async function POST(request: NextRequest) {
       request.headers,
       authorizationContext.externalProcessors,
     );
-    let content: CommunicationBriefContent;
-    if (aiGateway.mode === 'rules_only') {
-      content = createRulesOnlyCommunicationBrief(briefInput);
-    } else {
-      const prompt = MODEL_PROMPT.replace('{input}', JSON.stringify({
-        job: {
-          title: job.title,
-          salary_range: job.salary_range,
-          location: job.location,
-          skills_required: job.skills_required,
-          benefits: job.benefits,
-        },
-        candidate: {
-          name: candidateName,
-          current_company: currentCompany,
-          current_position: currentPosition,
-          skills: candidate.skills,
-          experience_years: candidate.experience_years,
-        },
-        accepted_shortlist_evidence: modelEvidence,
-        missing_information: missingInformation,
-        communication_goal: communicationGoal,
-      }));
-      let rawOutput = '';
-      const stream = aiGateway.stream(
-        [{ role: 'user', content: prompt }],
+
+    const saveBrief = async (content: CommunicationBriefContent) => {
+      const { data: storedBrief, error: briefError } = await supabase.rpc(
+        'create_communication_brief',
         {
-          model: aiGateway.policy.modelName ?? undefined,
-          temperature: 0.4,
-        },
-        {
-          directIdentifiers: [
-            candidateName,
-            currentCompany,
-            currentPosition,
-          ].filter((value): value is string => Boolean(value)),
+          p_shortlist_entry_id: entry.id,
+          p_prompt_version: PROMPT_VERSION,
+          p_ai_mode: aiGateway.mode,
+          p_candidate_value_points: content.candidate_value_points,
+          p_facts_to_verify: content.facts_to_verify,
+          p_interview_questions: [],
+          p_prohibited_claims: content.prohibited_claims,
+          p_draft_message: content.draft_message,
         },
       );
-      for await (const chunk of stream) {
-        rawOutput += chunk.content;
-        if (rawOutput.length > 20_000) {
-          throw new ApiRequestError('模型返回内容过长', 502);
-        }
+      if (briefError) {
+        throw rpcErrorToRequestError(briefError, '保存沟通 brief 失败');
       }
-      try {
-        content = parseModelCommunicationBrief(rawOutput);
-      } catch {
-        throw new ApiRequestError('模型未返回有效的结构化沟通 brief', 502);
-      }
+      return storedBrief;
+    };
+
+    // rules_only 模式：本地规则即时返回 JSON（无外部调用，无需流式）
+    if (aiGateway.mode === 'rules_only') {
+      const content = createRulesOnlyCommunicationBrief(briefInput);
+      const storedBrief = await saveBrief(content);
+      return NextResponse.json({
+        success: true,
+        data: {
+          brief: storedBrief,
+          script: content.draft_message,
+          candidate_name: candidateName,
+          job_title: job.title,
+        },
+      });
     }
 
-    const { data: storedBrief, error: briefError } = await supabase.rpc(
-      'create_communication_brief',
-      {
-        p_shortlist_entry_id: entry.id,
-        p_prompt_version: PROMPT_VERSION,
-        p_ai_mode: aiGateway.mode,
-        p_candidate_value_points: content.candidate_value_points,
-        p_facts_to_verify: content.facts_to_verify,
-        p_interview_questions: content.interview_questions,
-        p_prohibited_claims: content.prohibited_claims,
-        p_draft_message: content.draft_message,
+    // AI 模式：NDJSON 流式，逐分片回传生成过程，done 携带最终话术
+    const prompt = MODEL_PROMPT.replace('{input}', JSON.stringify({
+      job: {
+        title: job.title,
+        salary_range: job.salary_range,
+        location: job.location,
+        skills_required: job.skills_required,
+        benefits: job.benefits,
       },
-    );
-    if (briefError) {
-      throw rpcErrorToRequestError(briefError, '保存沟通 brief 失败');
-    }
+      candidate: {
+        name: candidateName,
+        current_company: currentCompany,
+        current_position: currentPosition,
+        skills: candidate.skills,
+        experience_years: candidate.experience_years,
+      },
+      accepted_shortlist_evidence: modelEvidence,
+      missing_information: missingInformation,
+      communication_goal: communicationGoal,
+    }));
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        brief: storedBrief,
-        script: content.draft_message,
-        candidate_name: candidateName,
-        job_title: job.title,
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enqueueLine = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        };
+        enqueueLine({ type: 'start' });
+        enqueueLine({ type: 'status', text: '正在调用 AI 模型撰写沟通话术…' });
+        try {
+          let rawOutput = '';
+          const chunks = aiGateway.stream(
+            [{ role: 'user', content: prompt }],
+            {
+              model: aiGateway.policy.modelName ?? undefined,
+              temperature: 0.4,
+            },
+            {
+              directIdentifiers: [
+                candidateName,
+                currentCompany,
+                currentPosition,
+              ].filter((value): value is string => Boolean(value)),
+            },
+          );
+          for await (const chunk of chunks) {
+            rawOutput += chunk.content;
+            if (rawOutput.length > 20_000) {
+              throw new ApiRequestError('模型返回内容过长', 502);
+            }
+            enqueueLine({ type: 'delta', text: chunk.content });
+          }
+          enqueueLine({ type: 'status', text: '正在解析并校验生成结果…' });
+          let content: CommunicationBriefContent;
+          try {
+            content = parseModelCommunicationBrief(rawOutput);
+          } catch {
+            throw new ApiRequestError('模型未返回有效的结构化沟通 brief', 502);
+          }
+          enqueueLine({ type: 'status', text: '正在保存沟通草稿…' });
+          const storedBrief = await saveBrief(content);
+          enqueueLine({
+            type: 'done',
+            data: {
+              brief: storedBrief,
+              script: content.draft_message,
+              candidate_name: candidateName,
+              job_title: job.title,
+            },
+          });
+          controller.close();
+        } catch (streamError) {
+          enqueueLine({
+            type: 'error',
+            error: streamError instanceof Error ? streamError.message : '生成沟通 brief 失败',
+          });
+          controller.close();
+        }
+      },
+    });
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
       },
     });
   } catch (error) {

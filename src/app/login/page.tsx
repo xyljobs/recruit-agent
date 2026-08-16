@@ -18,14 +18,17 @@ interface LoginOrganization {
   name: string;
 }
 
+// 本地演示环境权威组织 slug；公网部署无此组织时自动降级为「仅一个组织时自动选中」
+const DEMO_ORG_SLUG = 'drill';
+
 // 表单控件统一样式，对齐 https://hg.skylinktech.com.cn/compliance/ 登录页：
 // 灰底无边框输入框 + 蓝色通栏按钮
 const FIELD_INPUT_CLASS =
-  'h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus-visible:ring-2 focus-visible:ring-[#0D7FFF]/30 focus-visible:border-0';
+  'h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:border-0';
 const FIELD_SELECT_CLASS =
-  'w-full h-[38px] data-[size=default]:h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus:ring-2 focus:ring-[#0D7FFF]/30';
+  'w-full h-[38px] data-[size=default]:h-[38px] rounded-none border-0 bg-[#F0F2F6] text-base shadow-none focus:ring-2 focus:ring-primary/30';
 const SUBMIT_BUTTON_CLASS =
-  'h-10 w-full rounded-lg bg-[#0D7FFF] text-base font-normal hover:bg-[#005AC2] focus-visible:ring-[#0D7FFF]/40';
+  'h-10 w-full rounded-lg text-base font-normal focus-visible:ring-primary/40';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,7 +39,7 @@ export default function LoginPage() {
   const prefillDemoLogin = process.env.NEXT_PUBLIC_PREFILL_DEMO_LOGIN === 'true';
   const [loginData, setLoginData] = useState(
     prefillDemoLogin
-      ? { email: 'admin@drill.local', password: 'Tq7!o_FhbnWIehabmBx3sgSRPMkL', organizationSlug: '' }
+      ? { email: 'demo@zhaopin.local', password: 'Tq7!o_FhbnWIehabmBx3sgSRPMkL', organizationSlug: '' }
       : { email: '', password: '', organizationSlug: '' },
   );
   const [organizations, setOrganizations] = useState<LoginOrganization[]>([]);
@@ -52,7 +55,7 @@ export default function LoginPage() {
   });
 
   // 加载可选组织列表；支持 ?org=<slug> 预选（组织切换器跳转时携带），
-  // 仅一个组织时自动选中，兼容单组织部署的无感体验
+  // 未指定时默认选中演示组织，仅一个组织时自动选中，兼容单组织部署的无感体验
   useEffect(() => {
     async function loadOrganizations() {
       try {
@@ -65,8 +68,14 @@ export default function LoginPage() {
           if (preselected && list.some((item) => item.slug === preselected)) {
             return { ...current, organizationSlug: preselected };
           }
-          if (!current.organizationSlug && list.length === 1) {
-            return { ...current, organizationSlug: list[0].slug };
+          if (!current.organizationSlug) {
+            // URL 参数优先；否则默认选中演示组织，便于演示环境直接登录
+            const fallback =
+              list.find((item) => item.slug === DEMO_ORG_SLUG)?.slug ??
+              (list.length === 1 ? list[0].slug : '');
+            if (fallback) {
+              return { ...current, organizationSlug: fallback };
+            }
           }
           return current;
         });
@@ -189,7 +198,7 @@ export default function LoginPage() {
         <Card className="border-0 rounded-xl bg-white/95 px-2 py-8 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <div className="text-center">
             <h1 className="flex items-center justify-center gap-2.5 text-[2rem] font-semibold leading-tight text-[#31333F]">
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0D7FFF]">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary">
                 <CircleUserRound className="h-7 w-7 text-white" />
               </span>
               人才决策Agent
@@ -213,9 +222,10 @@ export default function LoginPage() {
                     <div className="relative">
                       <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10" />
                       <Select
-                        value={loginData.organizationSlug || undefined}
+                        value={loginData.organizationSlug}
                         onValueChange={(value) => {
-                          setLoginData({ ...loginData, organizationSlug: value });
+                          if (!value) return;
+                          setLoginData((current) => ({ ...current, organizationSlug: value }));
                           setMfaRequired(false);
                           setMfaCode('');
                         }}
@@ -297,22 +307,14 @@ export default function LoginPage() {
                     {loading ? '验证中...' : mfaRequired ? '验证并登录' : '登 录'}
                   </Button>
 
-                  <div className="text-center pt-2 flex items-center justify-center gap-4">
-                    <a
-                      href={withBasePath('/demo-guide.html')}
-                      target="_blank"
-                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      <BookOpen className="w-4 h-4" />
-                      查看演示指南
-                    </a>
+                  <div className="text-center pt-2">
                     <a
                       href={withBasePath('/evaluator-manual.html')}
                       target="_blank"
-                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                      className="inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 hover:underline"
                     >
                       <BookOpen className="w-4 h-4" />
-                      评审员操作手册
+                      评审员指南
                     </a>
                   </div>
 
@@ -414,7 +416,7 @@ export default function LoginPage() {
 
       {/* 贴底 footer，样式与 https://hg.skylinktech.com.cn/compliance/ 保持一致 */}
       <div className="fixed bottom-0 left-0 right-0 text-center py-2 text-xs text-[#999] bg-white/80">
-        © 卓越际联科技有限公司&nbsp;&nbsp;SINCE 2026
+        © 精密智造集团&nbsp;&nbsp;SINCE 2026
       </div>
     </div>
   );

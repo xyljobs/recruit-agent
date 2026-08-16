@@ -172,7 +172,7 @@ uv run boss_worker.py --once         # 单次模式(处理一个任务后退出)
 - 使用 shadcn/ui 组件，位于 `src/components/ui/`
 - 主色调: #3B82F6 (blue-500)
 - 布局: workspace 路由组 + 导航切换，页面按功能域拆分（analytics/candidates/jobs/matching/shortlists/pipeline/outcomes/data-sources）
-- 最大宽度: 1440px
+- 最大宽度: 通栏铺满（不设上限，宽屏优先）
 
 ## 部署前置条件
 
@@ -198,7 +198,7 @@ uv run boss_worker.py --once         # 单次模式(处理一个任务后退出)
 
 1. 执行迁移：`pnpm db:migrate`（或手动在 Supabase SQL Editor 执行 `scripts/migrate.sql`）
 2. 通过部署平台临时注入 `BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD`、`BOOTSTRAP_ORGANIZATION_NAME`、`BOOTSTRAP_ORGANIZATION_SLUG`，运行 `pnpm admin:bootstrap`；成功后立即删除这些 Secret
-3. 运行 `pnpm seed:demo` 插入演示数据（7 位候选人 + 4 个职位，含智能制造工程师、PLC 电控工程师 2 个制造业职位）
+3. 运行 `pnpm seed:demo` 插入演示数据（7 位候选人 + 2 个职位：智能制造工程师、PLC 电控工程师）
 
 > 管理员初始化命令只允许在尚无管理员时执行。初始密码至少 12 位，且首次登录必须修改；禁止重新使用历史演示邮箱。
 

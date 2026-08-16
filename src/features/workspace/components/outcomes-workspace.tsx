@@ -393,7 +393,6 @@ export function OutcomesWorkspace() {
                     <div className="flex flex-wrap items-center gap-2">
                       {task.script_snapshot && (
                         <Button
-                          variant="outline"
                           size="sm"
                           disabled={updating}
                           onClick={() => { setScriptTask(task); setScriptDialogOpen(true); }}
@@ -403,17 +402,17 @@ export function OutcomesWorkspace() {
                         </Button>
                       )}
                       {task.status !== 'contacted' && (
-                        <Button size="sm" variant="outline" disabled={updating} onClick={() => void markOutreachTask(task.id, 'contacted', '已标记为已触达')}>
+                        <Button size="sm" disabled={updating} onClick={() => void markOutreachTask(task.id, 'contacted', '已标记为已触达')}>
                           <PhoneOutgoing className="mr-1 h-3.5 w-3.5" />已触达
                         </Button>
                       )}
                       {task.status !== 'replied' && (
-                        <Button size="sm" variant="outline" disabled={updating} onClick={() => void markOutreachTask(task.id, 'replied', '已标记为已回复')}>
+                        <Button size="sm" disabled={updating} onClick={() => void markOutreachTask(task.id, 'replied', '已标记为已回复')}>
                           <MessageSquareReply className="mr-1 h-3.5 w-3.5" />已回复
                         </Button>
                       )}
                       {task.status !== 'no_response' && (
-                        <Button size="sm" variant="outline" disabled={updating} onClick={() => void markOutreachTask(task.id, 'no_response', '已标记为未响应')}>
+                        <Button size="sm" disabled={updating} onClick={() => void markOutreachTask(task.id, 'no_response', '已标记为未响应')}>
                           未响应
                         </Button>
                       )}

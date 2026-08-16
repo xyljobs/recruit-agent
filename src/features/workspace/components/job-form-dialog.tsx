@@ -288,7 +288,7 @@ export function JobFormDialog({ open, onOpenChange, job, onSaved }: JobFormDialo
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
           <Button onClick={() => void handleSubmit()} disabled={saving || !values.title.trim()}>
             {saving ? '保存中…' : job ? '保存修改' : '创建职位'}
           </Button>

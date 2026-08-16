@@ -1,17 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   Check,
   ChevronDown,
   CircleHelp,
   ClipboardList,
-  Copy,
   FileWarning,
+  Loader2,
   MessageSquareText,
-  Printer,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -23,6 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -38,7 +39,7 @@ import type { ShortlistDecision, ShortlistEntry, ShortlistRun } from '../decisio
 import { useWorkspaceData } from '../hooks/use-workspace-data';
 import { normalizeShortlistRuns } from '../lib/decision-ui';
 import type { Candidate, MatchRecord } from '../types';
-import { CandidateDetailDialog } from './candidate-dialogs';
+import { CandidateDetailPanel } from './candidate-dialogs';
 import { MatchRankingTable } from './match-ranking-table';
 
 const REASON_OPTIONS = [
@@ -50,75 +51,81 @@ const REASON_OPTIONS = [
   ['other', '其他'],
 ] as const;
 
+const SHORTLIST_POLL_INTERVAL_MS = 2000;
+const SHORTLIST_PENDING_STALL_SECONDS = 60;
+const SHORTLIST_TOTAL_TIMEOUT_SECONDS = 600;
+
+type ShortlistStage = 'reading_job' | 'loading_candidates' | 'scoring' | 'generating_shortlist';
+
+const SHORTLIST_STAGES: Array<{ stage: ShortlistStage; label: string }> = [
+  { stage: 'reading_job', label: '读取职位标准与评分权重' },
+  { stage: 'loading_candidates', label: '筛选具备决策权的候选人' },
+  { stage: 'scoring', label: '计算候选人匹配评分' },
+  { stage: 'generating_shortlist', label: '排序并生成短名单' },
+];
+
+interface ShortlistProgress {
+  status: 'pending' | 'running';
+  elapsed: number;
+  stalled: boolean;
+  stage: ShortlistStage | null;
+  scoredCandidates: number;
+  totalCandidates: number;
+}
+
+function parseShortlistStage(rawProgress: unknown): {
+  stage: ShortlistStage | null;
+  scoredCandidates: number;
+  totalCandidates: number;
+} {
+  if (!rawProgress || typeof rawProgress !== 'object') {
+    return { stage: null, scoredCandidates: 0, totalCandidates: 0 };
+  }
+  const progress = rawProgress as {
+    stage?: unknown;
+    scored_candidates?: unknown;
+    total_candidates?: unknown;
+  };
+  const stage = typeof progress.stage === 'string'
+    && SHORTLIST_STAGES.some((item) => item.stage === progress.stage)
+    ? progress.stage as ShortlistStage
+    : null;
+  const scoredCandidates = typeof progress.scored_candidates === 'number'
+    ? progress.scored_candidates
+    : 0;
+  const totalCandidates = typeof progress.total_candidates === 'number'
+    ? progress.total_candidates
+    : 0;
+  return { stage, scoredCandidates, totalCandidates };
+}
+
+function shortlistStageIndex(stage: ShortlistStage | null): number {
+  if (!stage) return -1;
+  return SHORTLIST_STAGES.findIndex((item) => item.stage === stage);
+}
+
+function shortlistProgressValue(progress: ShortlistProgress): number {
+  if (progress.status === 'pending') return 12;
+  switch (progress.stage) {
+    case 'reading_job': return 30;
+    case 'loading_candidates': return 50;
+    case 'scoring':
+      if (progress.totalCandidates > 0) {
+        const ratio = Math.min(progress.scoredCandidates / progress.totalCandidates, 1);
+        return 50 + Math.round(ratio * 35);
+      }
+      return 55;
+    case 'generating_shortlist': return 90;
+    default: return 40;
+  }
+}
+
 interface PreparedCommunicationBrief {
   draft_message: string;
   candidate_value_points: string[];
   facts_to_verify: string[];
-  interview_questions: string[];
   prohibited_claims: string[];
   review_status?: string;
-}
-
-interface InterviewGuideContent {
-  focus_areas: Array<{ dimension: string; why: string; must_verify: boolean }>;
-  common_questions: Array<{ bank_id: string; question: string; dimension: string }>;
-  targeted_questions: Array<{
-    question: string;
-    dimension: string;
-    origin: 'evidence_gap' | 'depth_check' | 'boundary_risk' | 'resume_probe';
-    expected_signals: string[];
-    probe_followups: string[];
-    scoring_anchors: string[];
-  }>;
-  red_flags_to_check: string[];
-  interview_loop: Array<{ round: number; focus: string; minutes: number; interviewer_role: string }>;
-  prohibited_topics: string[];
-}
-
-interface PreparedInterviewGuide {
-  guide: { id: string; ai_mode: string } | null;
-  content: InterviewGuideContent;
-  candidate_name: string;
-}
-
-const GUIDE_ORIGIN_LABELS: Record<InterviewGuideContent['targeted_questions'][number]['origin'], { label: string; className: string }> = {
-  evidence_gap: { label: '证据缺口', className: 'bg-amber-100 text-amber-800' },
-  depth_check: { label: '证据深挖', className: 'bg-blue-100 text-blue-800' },
-  boundary_risk: { label: '边界风险', className: 'bg-violet-100 text-violet-800' },
-  resume_probe: { label: '简历追问', className: 'bg-emerald-100 text-emerald-800' },
-};
-
-function guideToPlainText(guide: InterviewGuideContent, candidateName: string): string {
-  const lines: string[] = [];
-  lines.push(`面试提纲：${candidateName}`);
-  lines.push('');
-  lines.push('一、考察重点');
-  guide.focus_areas.forEach((area, index) => {
-    lines.push(`${index + 1}. ${area.dimension}${area.must_verify ? '（必须核实）' : ''}：${area.why}`);
-  });
-  lines.push('');
-  lines.push('二、公共必问题（来自 HR 题库，未经 AI 改写）');
-  guide.common_questions.forEach((item, index) => {
-    lines.push(`${index + 1}. [${item.dimension}] ${item.question}`);
-  });
-  lines.push('');
-  lines.push('三、候选人专项题');
-  guide.targeted_questions.forEach((item, index) => {
-    lines.push(`${index + 1}. [${item.dimension}] ${item.question}`);
-    if (item.expected_signals.length > 0) lines.push(`   期望信号：${item.expected_signals.join('；')}`);
-    if (item.probe_followups.length > 0) lines.push(`   追问路径：${item.probe_followups.join('；')}`);
-    if (item.scoring_anchors.length > 0) lines.push(`   打分锚点：${item.scoring_anchors.join('；')}`);
-  });
-  lines.push('');
-  lines.push('四、风险核查');
-  guide.red_flags_to_check.forEach(item => lines.push(`- ${item}`));
-  lines.push('');
-  lines.push('五、面试轮次建议');
-  guide.interview_loop.forEach(item => lines.push(`- 第 ${item.round} 轮（${item.minutes} 分钟，${item.interviewer_role}）：${item.focus}`));
-  lines.push('');
-  lines.push('六、禁问提示');
-  lines.push(guide.prohibited_topics.join('、'));
-  return lines.join('\n');
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -139,7 +146,7 @@ function EvidenceList({ entry }: { entry: ShortlistEntry }) {
   return (
     <div className="space-y-3">
       {entry.evidence_snapshot.map((evidence, index) => (
-        <div key={`${evidence.criterion_id}-${index}`} className="rounded-lg border border-slate-200 bg-white p-3">
+        <div key={`${evidence.criterion_id}-${index}`} className="rounded-lg border border-slate-200 bg-card p-3">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{evidence.dimension}</Badge>
             <Badge className={cn('hover:bg-current/0', evidence.support_level === 'supported' ? 'bg-emerald-100 text-emerald-800' : evidence.support_level === 'conflicting' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800')}>
@@ -160,6 +167,7 @@ function EvidenceList({ entry }: { entry: ShortlistEntry }) {
 }
 
 function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onChanged: () => Promise<void> }) {
+  const router = useRouter();
   const [decision, setDecision] = useState<Exclude<ShortlistDecision, 'unreviewed'>>(
     entry.human_decision === 'unreviewed' ? 'accepted' : entry.human_decision,
   );
@@ -167,9 +175,8 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
   const [note, setNote] = useState(entry.override_note ?? '');
   const [saving, setSaving] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  const [communicationSteps, setCommunicationSteps] = useState<string[]>([]);
   const [brief, setBrief] = useState<PreparedCommunicationBrief | null>(null);
-  const [guidePreparing, setGuidePreparing] = useState(false);
-  const [guide, setGuide] = useState<PreparedInterviewGuide | null>(null);
 
   const verdict = useMemo(() => {
     const skillAnalysis = entry.match_details?.skill_analysis;
@@ -226,64 +233,66 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
 
   async function prepareCommunication() {
     setPreparing(true);
+    setCommunicationSteps(['正在准备候选人信息与匹配证据…']);
     try {
       const response = await authFetch('/api/script/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shortlist_entry_id: entry.id, communication_goal: '邀请候选人了解职位机会' }),
       });
-      const result: { success?: boolean; data?: { script?: string; brief?: PreparedCommunicationBrief }; error?: string } = await response.json();
-      if (!response.ok || !result.success || !result.data?.script || !result.data.brief) throw new Error(result.error || '沟通内容准备失败');
-      setBrief(result.data.brief);
-      toast.success('沟通内容已准备，请人工确认后使用');
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.ok) {
+        const result: { error?: string } | null = await response.json().catch(() => null);
+        throw new Error(result?.error || '话术生成失败');
+      }
+      // JSON 响应：rules_only 模式本地规则即时返回
+      if (contentType.includes('application/json')) {
+        const result: { success?: boolean; data?: { script?: string; brief?: PreparedCommunicationBrief }; error?: string } = await response.json();
+        if (!result.success || !result.data?.script || !result.data.brief) throw new Error(result.error || '话术生成失败');
+        setBrief(result.data.brief);
+        toast.success('AI 话术已生成，请人工确认后使用');
+        return;
+      }
+      // NDJSON 流式：status 为生成过程，done 携带最终结果
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('话术生成失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const outcome: { brief?: PreparedCommunicationBrief; error?: string } = {};
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: { type?: string; text?: string; data?: { script?: string; brief?: PreparedCommunicationBrief }; error?: string } = JSON.parse(line);
+        if (event.type === 'status' && event.text) {
+          setCommunicationSteps((prev) => [...prev, event.text as string]);
+        } else if (event.type === 'done' && event.data) {
+          outcome.brief = event.data.brief;
+        } else if (event.type === 'error') {
+          outcome.error = event.error || '话术生成失败';
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+      if (outcome.error) throw new Error(outcome.error);
+      if (!outcome.brief) throw new Error('话术生成失败');
+      setBrief(outcome.brief);
+      toast.success('AI 话术已生成，请人工确认后使用');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '沟通内容准备失败');
+      toast.error(error instanceof Error ? error.message : '话术生成失败');
     } finally {
       setPreparing(false);
+      setCommunicationSteps([]);
     }
   }
 
-  async function prepareInterviewGuide() {
-    setGuidePreparing(true);
-    try {
-      const response = await authFetch('/api/interview/guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shortlist_entry_id: entry.id, client_event_id: crypto.randomUUID() }),
-      });
-      const result: { success?: boolean; data?: PreparedInterviewGuide; error?: string } = await response.json();
-      if (!response.ok || !result.success || !result.data) throw new Error(result.error || '面试提纲生成失败');
-      setGuide(result.data);
-      toast.success('面试提纲已生成，请人工确认后使用');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '面试提纲生成失败');
-    } finally {
-      setGuidePreparing(false);
-    }
-  }
-
-  async function copyGuide() {
-    if (!guide) return;
-    try {
-      await navigator.clipboard.writeText(guideToPlainText(guide.content, guide.candidate_name));
-      toast.success('面试提纲已复制到剪贴板');
-    } catch {
-      toast.error('复制失败，请手动选择文本复制');
-    }
-  }
-
-  // 打印导出：临时挂载打印容器，@media print 规则只渲染该容器（见 globals.css）
-  function printGuide() {
-    if (!guide) return;
-    const host = document.createElement('div');
-    host.className = 'interview-guide-print';
-    const body = document.createElement('pre');
-    body.className = 'interview-guide-print-body';
-    body.textContent = guideToPlainText(guide.content, guide.candidate_name);
-    host.appendChild(body);
-    document.body.appendChild(host);
-    window.print();
-    host.remove();
+  function openInterviewGuide() {
+    router.push(`/interview-guides?entry=${entry.id}`);
   }
 
   const candidateName = entry.candidate?.name || `候选人 ${entry.rank}`;
@@ -330,15 +339,15 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
           </div>
           <div className="rounded-xl border border-slate-200 p-4">
             <h4 className="text-sm font-semibold text-slate-900">证据完整度</h4>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100" aria-label={`置信度 ${entry.confidence_score}%`}><div className="h-full bg-blue-600" style={{ width: `${entry.confidence_score}%` }} /></div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100" aria-label={`置信度 ${entry.confidence_score}%`}><div className="h-full bg-primary" style={{ width: `${entry.confidence_score}%` }} /></div>
             <p className="mt-2 text-xs leading-5 text-slate-500">置信度只表示证据是否充分，不代表候选人质量。</p>
           </div>
         </aside>
       </CardContent>
 
       <div className="border-t border-slate-200 bg-slate-50 p-5">
-        <div className="grid gap-3 lg:grid-cols-[12rem_13rem_1fr_auto] lg:items-end">
-          <div className="space-y-2">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-44 space-y-2">
             <Label htmlFor={`decision-${entry.id}`}>人工决策</Label>
             <Select value={decision} onValueChange={(value) => setDecision(value as Exclude<ShortlistDecision, 'unreviewed'>)}>
               <SelectTrigger id={`decision-${entry.id}`} className="w-full"><SelectValue /></SelectTrigger>
@@ -346,7 +355,7 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
             </Select>
           </div>
           {decision === 'overridden' && (
-            <div className="space-y-2">
+            <div className="w-44 space-y-2">
               <Label htmlFor={`reason-${entry.id}`}>覆盖原因（必填）</Label>
               <Select value={reasonCode} onValueChange={setReasonCode}>
                 <SelectTrigger id={`reason-${entry.id}`} className="w-full"><SelectValue placeholder="选择原因" /></SelectTrigger>
@@ -354,7 +363,7 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
               </Select>
             </div>
           )}
-          <div className="space-y-2">
+          <div className="min-w-44 flex-1 space-y-2">
             <Label htmlFor={`note-${entry.id}`}>{decision === 'needs_information' ? '需要补充什么' : '决策说明'}</Label>
             <Textarea id={`note-${entry.id}`} value={note} onChange={(event) => setNote(event.target.value)} placeholder="记录可追溯的人工判断依据" className="min-h-9 resize-y" />
           </div>
@@ -364,113 +373,36 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
           <div className="mt-4 border-t border-slate-200 pt-4">
             <div className="flex flex-wrap items-center gap-2">
               {entry.human_decision === 'accepted' && (
-                <Button variant="outline" onClick={() => void prepareCommunication()} disabled={preparing}><MessageSquareText className="mr-2 h-4 w-4" />{preparing ? '准备中…' : '准备沟通内容'}</Button>
+                <Button onClick={() => void prepareCommunication()} disabled={preparing}><MessageSquareText className="mr-2 h-4 w-4" />{preparing ? '生成中…' : 'AI生成话术'}</Button>
               )}
-              <Button variant="outline" onClick={() => void prepareInterviewGuide()} disabled={guidePreparing}><ClipboardList className="mr-2 h-4 w-4" />{guidePreparing ? '生成中…' : '生成面试提纲'}</Button>
+              <Button onClick={openInterviewGuide}><ClipboardList className="mr-2 h-4 w-4" />AI生成面试提纲</Button>
             </div>
-            <p className="mt-2 text-xs text-slate-500">仅已被人工接受或覆盖的候选人可准备沟通与面试提纲；使用前仍需人工确认。</p>
+            <p className="mt-2 text-xs text-slate-500">生成内容需人工确认后使用。</p>
+            {preparing && (
+              <div className="mt-3 rounded-lg bg-muted/50 p-3">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">AI 正在生成沟通话术，请稍候：</p>
+                <ul className="space-y-1.5">
+                  {communicationSteps.map((step, index) => {
+                    const isCurrent = index === communicationSteps.length - 1;
+                    return (
+                      <li key={`${step}-${index}`} className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {isCurrent ? <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" /> : <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+                        {step}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
             {brief && (
-              <div className="mt-3 grid gap-4 rounded-lg border border-blue-200 bg-white p-4 lg:grid-cols-2">
+              <div className="mt-3 grid gap-4 rounded-lg border border-blue-200 bg-card p-4 lg:grid-cols-2">
                 <div className="lg:col-span-2">
                   <div className="flex items-center justify-between gap-3"><h5 className="text-sm font-semibold text-slate-900">待人工审核的沟通草稿</h5><Badge variant="outline">{brief.review_status === 'approved' ? '已审核' : '待审核'}</Badge></div>
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{brief.draft_message}</p>
                 </div>
                 <div><h5 className="text-sm font-semibold text-slate-900">可用沟通切入点</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.candidate_value_points.map(item => <li key={item}>{item}</li>)}</ul></div>
                 <div><h5 className="text-sm font-semibold text-slate-900">发送前需核验</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.facts_to_verify.map(item => <li key={item}>{item}</li>)}</ul></div>
-                <div><h5 className="text-sm font-semibold text-slate-900">建议面试问题</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.interview_questions.map(item => <li key={item}>{item}</li>)}</ul></div>
                 <div><h5 className="text-sm font-semibold text-slate-900">禁止承诺</h5><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{brief.prohibited_claims.map(item => <li key={item}>{item}</li>)}</ul></div>
-              </div>
-            )}
-            {guide && (
-              <div id={`guide-content-${entry.id}`} className="mt-3 rounded-lg border border-blue-200 bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50/60 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <h5 className="text-sm font-semibold text-slate-900">面试提纲</h5>
-                    <Badge variant="outline">{guide.guide?.ai_mode === 'rules_only' ? '纯规则生成' : 'AI 辅助生成'}</Badge>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void copyGuide()}><Copy className="mr-1.5 h-3.5 w-3.5" />复制全文</Button>
-                    <Button variant="outline" size="sm" onClick={printGuide}><Printer className="mr-1.5 h-3.5 w-3.5" />打印</Button>
-                  </div>
-                </div>
-                <div className="space-y-6 p-4">
-                  <section>
-                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">考察重点</h6>
-                    {guide.content.focus_areas.length > 0 ? (
-                      <ul className="mt-2 space-y-2">
-                        {guide.content.focus_areas.map(area => (
-                          <li key={`${area.dimension}-${area.why}`} className="flex flex-wrap items-start gap-2 text-sm">
-                            <Badge variant="outline">{area.dimension}</Badge>
-                            {area.must_verify && <Badge className="bg-red-100 text-red-800">必须核实</Badge>}
-                            <span className="text-slate-600">{area.why}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : <p className="mt-2 text-sm text-slate-400">暂无</p>}
-                  </section>
-                  <section>
-                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">公共必问题</h6>
-                    <p className="mt-1 text-xs text-slate-400">来自 HR 题库，未经 AI 改写</p>
-                    {guide.content.common_questions.length > 0 ? (
-                      <ol className="mt-2 space-y-2">
-                        {guide.content.common_questions.map((item, index) => (
-                          <li key={`${item.bank_id}-${index}`} className="flex items-start gap-2 text-sm">
-                            <span className="text-slate-400">{index + 1}.</span>
-                            <Badge variant="outline" className="shrink-0 bg-sky-50">HR 题库</Badge>
-                            <span className="text-slate-800">[{item.dimension}] {item.question}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : <p className="mt-2 text-sm text-slate-400">题库暂无启用题目</p>}
-                  </section>
-                  <section>
-                    <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">候选人专项题</h6>
-                    <ol className="mt-2 space-y-1">
-                      {guide.content.targeted_questions.map((item, index) => {
-                        const origin = GUIDE_ORIGIN_LABELS[item.origin];
-                        return (
-                          <li key={`${item.question}-${index}`}>
-                            <Collapsible>
-                              <CollapsibleTrigger asChild>
-                                <Button variant="ghost" className="w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal text-slate-800">
-                                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                                  <span>{index + 1}. {item.question}</span>
-                                  <Badge className={origin.className}>{origin.label}</Badge>
-                                </Button>
-                              </CollapsibleTrigger>
-                              <CollapsibleContent className="pl-8">
-                                <div className="space-y-1 py-2 text-xs leading-5 text-slate-600">
-                                  <p>考察点：{item.dimension}</p>
-                                  {item.expected_signals.length > 0 && <p>期望信号：{item.expected_signals.join('；')}</p>}
-                                  {item.probe_followups.length > 0 && <p>追问路径：{item.probe_followups.join('；')}</p>}
-                                  {item.scoring_anchors.length > 0 && <p>打分锚点：{item.scoring_anchors.join('；')}</p>}
-                                </div>
-                              </CollapsibleContent>
-                            </Collapsible>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </section>
-                  <section className="grid gap-4 sm:grid-cols-3">
-                    <div>
-                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">风险核查</h6>
-                      {guide.content.red_flags_to_check.length > 0 ? (
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{guide.content.red_flags_to_check.map(item => <li key={item}>{item}</li>)}</ul>
-                      ) : <p className="mt-2 text-sm text-slate-400">暂无</p>}
-                    </div>
-                    <div>
-                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">面试轮次建议</h6>
-                      <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                        {guide.content.interview_loop.map(item => <li key={`${item.round}-${item.focus}`}>第 {item.round} 轮（{item.minutes} 分钟 · {item.interviewer_role}）：{item.focus}</li>)}
-                      </ul>
-                    </div>
-                    <div>
-                      <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-500">禁问提示</h6>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{guide.content.prohibited_topics.join('、')}等内容禁止在面试中询问。</p>
-                    </div>
-                  </section>
-                </div>
               </div>
             )}
           </div>
@@ -492,20 +424,20 @@ function ShortlistEntryCard({ entry, onChanged }: { entry: ShortlistEntry; onCha
 
 function ShortlistConceptGuide() {
   return (
-    <Collapsible className="rounded-xl border border-blue-200 bg-blue-50/60">
+    <Collapsible defaultOpen={false} className="rounded-xl border border-blue-200 bg-blue-50/60">
       <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-start px-4 text-blue-800 hover:bg-blue-100/60 hover:text-blue-900">
+        <Button variant="ghost" className="w-full justify-start px-4 text-primary hover:bg-primary/10 hover:text-primary">
           <CircleHelp className="mr-2 h-4 w-4" />什么是短名单？首次使用先看这里
           <ChevronDown className="ml-2 h-4 w-4" />
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent className="px-4 pb-4">
         <div className="grid gap-4 pt-2 lg:grid-cols-3">
-          <div className="rounded-lg border border-blue-100 bg-white p-4">
+          <div className="rounded-lg border border-blue-100 bg-card p-4">
             <h4 className="text-sm font-semibold text-slate-900">短名单是什么</h4>
             <p className="mt-2 text-sm leading-6 text-slate-600">短名单是系统针对某个职位，从候选人库中筛选出的「值得人工重点评估的一小批候选人」，按优先序排列。它不是最终录用决定，只是帮你把注意力集中在最可能合适的少数人身上。</p>
           </div>
-          <div className="rounded-lg border border-blue-100 bg-white p-4">
+          <div className="rounded-lg border border-blue-100 bg-card p-4">
             <h4 className="text-sm font-semibold text-slate-900">短名单从哪来</h4>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
               <li>在<Link href="/jobs" className="mx-0.5 font-medium text-blue-700 underline underline-offset-4">职位与标准</Link>中解析 JD、确认用人标准；</li>
@@ -513,7 +445,7 @@ function ShortlistConceptGuide() {
               <li>在本页选择职位，系统才会对已入库且仍绑定该职位的候选人进行智能匹配并生成短名单。</li>
             </ol>
           </div>
-          <div className="rounded-lg border border-blue-100 bg-white p-4">
+          <div className="rounded-lg border border-blue-100 bg-card p-4">
             <h4 className="text-sm font-semibold text-slate-900">在这里要做什么</h4>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
               <li>在「排序表」横向比较全批次候选人的结论与依据，点候选人姓名查看画像；</li>
@@ -532,14 +464,26 @@ function ShortlistConceptGuide() {
 
 export function ShortlistsWorkspace() {
   const { jobs, candidates, matchRecords } = useWorkspaceData();
+  const router = useRouter();
   const [runs, setRuns] = useState<ShortlistRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedJobId, setSelectedJobId] = useState('');
   const [loading, setLoading] = useState(true);
   const [creatingShortlist, setCreatingShortlist] = useState(false);
   const [qualifying, setQualifying] = useState(false);
-  const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
-  const [profileCandidateId, setProfileCandidateId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<string>('table');
+  // 已打开的候选人详情 Tab：每点一个候选人新开一个可关闭的 Tab（用候选 ID 作 Tab value）
+  const [openProfileIds, setOpenProfileIds] = useState<string[]>([]);
+  const [progress, setProgress] = useState<ShortlistProgress | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressStartedAtRef = useRef(0);
+
+  // 卸载时清理进度轮询定时器
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, []);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -587,13 +531,13 @@ export function ShortlistsWorkspace() {
   const reviewedCount = selectedRun?.entries.filter((entry) => entry.human_decision !== 'unreviewed').length ?? 0;
   const acceptedCount = selectedRun?.entries.filter((entry) => entry.human_decision === 'accepted').length ?? 0;
 
-  const profileCandidate = useMemo(() => {
-    if (!profileCandidateId) return null;
-    const direct = candidates.find((candidate) => candidate.id === profileCandidateId);
+  // 详情 Tab 展示的候选人：优先取全局候选人库，缺失时用短名单条目快照兜底构造最小画像
+  function resolveProfileCandidate(candidateId: string): Candidate | null {
+    const direct = candidates.find((candidate) => candidate.id === candidateId);
     if (direct) return direct;
-    const entry = selectedRun?.entries.find((item) => item.candidate_id === profileCandidateId);
+    const entry = selectedRun?.entries.find((item) => item.candidate_id === candidateId);
     if (!entry) return null;
-    const minimal: Candidate = {
+    return {
       id: entry.candidate_id,
       name: entry.candidate?.name ?? '候选人',
       email: null,
@@ -610,18 +554,33 @@ export function ShortlistsWorkspace() {
       created_at: '',
       authorization: null,
     };
-    return minimal;
-  }, [profileCandidateId, selectedRun, candidates]);
+  }
 
-  const profileMatchRecord = useMemo(() => {
-    if (!profileCandidateId || !selectedRun) return null;
+  function resolveProfileMatchRecord(candidateId: string): MatchRecord | null {
+    if (!selectedRun) return null;
     return matchRecords.find(
-      (record) => record.job_id === selectedRun.job_id && record.candidate_id === profileCandidateId,
+      (record) => record.job_id === selectedRun.job_id && record.candidate_id === candidateId,
     ) ?? null;
-  }, [profileCandidateId, selectedRun, matchRecords]);
+  }
 
-  const profileIncomplete = profileCandidate !== null
-    && !candidates.some((candidate) => candidate.id === profileCandidateId);
+  function profileName(candidateId: string): string {
+    const direct = candidates.find((candidate) => candidate.id === candidateId);
+    if (direct) return direct.name;
+    const entry = selectedRun?.entries.find((item) => item.candidate_id === candidateId);
+    return entry?.candidate?.name ?? '候选人';
+  }
+
+  function openProfile(candidateId: string) {
+    setOpenProfileIds((previous) =>
+      previous.includes(candidateId) ? previous : [...previous, candidateId],
+    );
+    setViewMode(candidateId);
+  }
+
+  function closeProfile(candidateId: string) {
+    setOpenProfileIds((previous) => previous.filter((id) => id !== candidateId));
+    setViewMode((previous) => (previous === candidateId ? 'table' : previous));
+  }
 
   function gotoDecision(entryId: string) {
     setViewMode('card');
@@ -679,6 +638,65 @@ export function ShortlistsWorkspace() {
     }
   }
 
+  async function pollShortlistStatus(runId: string) {
+    const totalElapsed = Math.floor(
+      (Date.now() - progressStartedAtRef.current) / 1000,
+    );
+    if (totalElapsed >= SHORTLIST_TOTAL_TIMEOUT_SECONDS) {
+      setProgress(null);
+      toast.warning('智能匹配耗时过长，已停止自动等待，请稍后重新进入本页查看');
+      return;
+    }
+    try {
+      const response = await authFetch(`/api/shortlists/${runId}/status`);
+      const result: {
+        success?: boolean;
+        data?: { status?: string; candidateCount?: number; errorMessage?: string; progress?: unknown };
+        error?: string;
+      } = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '进度查询失败');
+      }
+      const status = result.data?.status;
+      if (status === 'ready') {
+        setProgress(null);
+        await loadRuns();
+        setSelectedRunId(runId);
+        toast.success(
+          `智能匹配完成，已生成短名单（${result.data?.candidateCount ?? 0} 位候选人）`,
+        );
+        return;
+      }
+      if (status === 'failed') {
+        setProgress(null);
+        await loadRuns();
+        toast.error(result.data?.errorMessage || '智能匹配失败');
+        return;
+      }
+      const parsedProgress = parseShortlistStage(result.data?.progress);
+      setProgress({
+        status: status === 'running' ? 'running' : 'pending',
+        elapsed: totalElapsed,
+        stalled: status === 'pending' && totalElapsed >= SHORTLIST_PENDING_STALL_SECONDS,
+        ...parsedProgress,
+      });
+      pollRef.current = setTimeout(
+        () => void pollShortlistStatus(runId),
+        SHORTLIST_POLL_INTERVAL_MS,
+      );
+    } catch {
+      if (totalElapsed >= SHORTLIST_TOTAL_TIMEOUT_SECONDS) {
+        setProgress(null);
+        toast.warning('智能匹配进度查询超时，请稍后重新进入本页查看');
+        return;
+      }
+      pollRef.current = setTimeout(
+        () => void pollShortlistStatus(runId),
+        SHORTLIST_POLL_INTERVAL_MS,
+      );
+    }
+  }
+
   async function createShortlist() {
     if (!selectedJob) {
       toast.error('请先选择已启用的职位');
@@ -701,13 +719,22 @@ export function ShortlistsWorkspace() {
           client_event_id: crypto.randomUUID(),
         }),
       });
-      const result: { success?: boolean; data?: { shortlist_run_id?: string }; error?: string } = await response.json();
+      const result: {
+        success?: boolean;
+        data?: { shortlist_run_id?: string };
+        error?: string;
+      } = await response.json();
       if (!response.ok || !result.success) {
         throw new Error(result.error || '短名单任务提交失败');
       }
-      toast.success('智能匹配已开始，完成后可在本页审阅短名单');
-      await loadRuns();
-      if (result.data?.shortlist_run_id) setSelectedRunId(result.data.shortlist_run_id);
+      const runId = result.data?.shortlist_run_id;
+      if (!runId) throw new Error('短名单任务创建失败');
+      progressStartedAtRef.current = Date.now();
+      setProgress({ status: 'pending', elapsed: 0, stalled: false, stage: null, scoredCandidates: 0, totalCandidates: 0 });
+      pollRef.current = setTimeout(
+        () => void pollShortlistStatus(runId),
+        SHORTLIST_POLL_INTERVAL_MS,
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '短名单任务提交失败');
     } finally {
@@ -718,20 +745,15 @@ export function ShortlistsWorkspace() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Human review</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">候选人短名单</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">短名单是系统按职位筛选出的一小批值得重点评估的候选人。先审证据和缺失信息，再做人工判断。排序分隐藏在明细中，不能用于自动拒绝。</p></div>
-        <Button variant="outline" onClick={() => void loadRuns()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新短名单</Button>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Human review</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">候选人短名单</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">按职位筛选出值得重点评估的候选人，先审证据再做人工判断。</p></div>
       </div>
 
       <Card className="border-blue-200 bg-blue-50/40 shadow-none">
-        <CardContent className="grid gap-4 pt-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-          <div className="space-y-2">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">第三步：匹配已入库候选人</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">选择职位后，仅匹配已入库且仍有效关联该职位的候选人。</p>
-            </div>
-            <Label htmlFor="shortlist-job">选择职位</Label>
+        <CardContent className="grid gap-4 pt-6 lg:grid-cols-2 lg:items-start">
+          <div className="space-y-3">
+            <Label htmlFor="shortlist-job">选择职位（仅匹配已入库且有效绑定的候选人）</Label>
             <Select value={selectedJobId} onValueChange={setSelectedJobId} disabled={activeJobs.length === 0 || creatingShortlist}>
-              <SelectTrigger id="shortlist-job" className="max-w-xl bg-white">
+              <SelectTrigger id="shortlist-job" className="w-full bg-card">
                 <SelectValue placeholder="选择要匹配的职位" />
               </SelectTrigger>
               <SelectContent>
@@ -747,11 +769,75 @@ export function ShortlistsWorkspace() {
                 ? `当前职位已有 ${boundCandidates.length} 位候选人完成入库并有效绑定。`
                 : '请先在第一步启用职位，并在第二步完成候选人入库。'}
             </p>
+            <Button onClick={() => void createShortlist()} disabled={!selectedJob || boundCandidates.length === 0 || creatingShortlist || progress !== null}>
+              {creatingShortlist ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              {creatingShortlist ? '提交中…' : progress ? '匹配中…' : 'AI智能匹配'}
+            </Button>
           </div>
-          <Button onClick={() => void createShortlist()} disabled={!selectedJob || boundCandidates.length === 0 || creatingShortlist}>
-            {creatingShortlist ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            {creatingShortlist ? '提交中…' : '开始智能匹配'}
-          </Button>
+          <div className="space-y-3">
+            <Label htmlFor="shortlist-run">职位与短名单批次</Label>
+            <Select value={selectedRunId} onValueChange={setSelectedRunId} disabled={runs.length === 0}>
+              <SelectTrigger id="shortlist-run" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>{runs.map((run) => <SelectItem key={run.id} value={run.id}>{jobTitle(run)} · {formatDate(run.requested_at)}</SelectItem>)}</SelectContent>
+            </Select>
+            {runs.length === 0 ? (
+              <p className="text-xs text-slate-500">还没有短名单，请先在左侧选择职位并开始智能匹配。</p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{selectedRun?.candidate_count ?? 0} 位候选人</Badge><Badge variant="outline">已审 {reviewedCount}/{selectedRun?.entries.length ?? 0}</Badge>{selectedRun?.qualified_at ? <Badge className="bg-emerald-100 text-emerald-800"><UserCheck className="mr-1 h-3 w-3" />HR 已确认合格</Badge> : <Button size="sm" onClick={() => void qualifyRun()} disabled={qualifying || acceptedCount === 0}><UserCheck className="mr-2 h-4 w-4" />{qualifying ? '确认中…' : '确认合格短名单'}</Button>}</div>
+            )}
+          </div>
+          {progress && (
+            <div className="space-y-3 rounded-lg border border-blue-200 bg-card p-4 lg:col-span-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                <span className="font-medium text-slate-900">正在智能匹配</span>
+                <span className="ml-auto text-xs text-slate-500">已 {progress.elapsed} 秒</span>
+              </div>
+              <Progress value={shortlistProgressValue(progress)} />
+              {progress.status === 'pending' ? (
+                <p className="text-xs text-slate-600">任务已提交，等待匹配 Worker 领取并处理…</p>
+              ) : (
+                <ol className="space-y-1.5">
+                  {SHORTLIST_STAGES.map((stage) => {
+                    const stageIndex = SHORTLIST_STAGES.findIndex((item) => item.stage === stage.stage);
+                    const currentIndex = shortlistStageIndex(progress.stage);
+                    const isDone = currentIndex > stageIndex;
+                    const isCurrent = currentIndex === stageIndex;
+                    const isScoring = stage.stage === 'scoring' && isCurrent;
+                    return (
+                      <li
+                        key={stage.stage}
+                        className={cn(
+                          'flex items-center gap-2 text-xs',
+                          isCurrent ? 'text-slate-900' : isDone ? 'text-slate-500' : 'text-slate-400',
+                        )}
+                      >
+                        {isDone ? (
+                          <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                        ) : isCurrent ? (
+                          <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+                        ) : (
+                          <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-300" />
+                        )}
+                        <span>
+                          {stage.label}
+                          {isScoring && progress.totalCandidates > 0
+                            ? `（${progress.scoredCandidates}/${progress.totalCandidates}）`
+                            : ''}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+              {progress.stalled && (
+                <p className="text-xs leading-5 text-amber-700">
+                  任务仍在排队，请确认匹配 Worker 已启动（<code className="rounded bg-slate-100 px-1 py-0.5">pnpm worker:match</code>）。
+                  也可运行 <code className="rounded bg-slate-100 px-1 py-0.5">pnpm worker:match:once</code> 单次处理一个任务后退出。
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -761,26 +847,45 @@ export function ShortlistsWorkspace() {
         <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>还没有短名单</AlertTitle><AlertDescription>请先确认职位、完成候选人入库，然后在上方选择职位开始智能匹配。</AlertDescription></Alert>
       ) : (
         <>
-          <Card className="gap-4 border-slate-200 shadow-none">
-            <CardContent className="grid gap-4 pt-0 md:grid-cols-[1fr_auto] md:items-end">
-              <div className="space-y-2"><Label htmlFor="shortlist-run">职位与短名单批次</Label><Select value={selectedRunId} onValueChange={setSelectedRunId}><SelectTrigger id="shortlist-run" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{runs.map((run) => <SelectItem key={run.id} value={run.id}>{jobTitle(run)} · {formatDate(run.requested_at)}</SelectItem>)}</SelectContent></Select></div>
-              <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{selectedRun?.candidate_count ?? 0} 位候选人</Badge><Badge variant="outline">已审 {reviewedCount}/{selectedRun?.entries.length ?? 0}</Badge>{selectedRun?.qualified_at ? <Badge className="bg-emerald-100 text-emerald-800"><UserCheck className="mr-1 h-3 w-3" />HR 已确认合格</Badge> : <Button size="sm" onClick={() => void qualifyRun()} disabled={qualifying || acceptedCount === 0}><UserCheck className="mr-2 h-4 w-4" />{qualifying ? '确认中…' : '确认合格短名单'}</Button>}</div>
-            </CardContent>
-          </Card>
           {selectedRun && (
-            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'table' | 'card')}>
+            <Tabs value={viewMode} onValueChange={setViewMode}>
               <TabsList>
                 <TabsTrigger value="table">排序表（横向比较）</TabsTrigger>
                 <TabsTrigger value="card">逐条审阅（记录决策）</TabsTrigger>
+                {openProfileIds.map((candidateId) => (
+                  <TabsTrigger key={candidateId} value={candidateId}>
+                    <span className="max-w-32 truncate">{profileName(candidateId)}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`关闭${profileName(candidateId)}详情`}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeProfile(candidateId);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.stopPropagation();
+                          closeProfile(candidateId);
+                        }
+                      }}
+                      className="ml-1 inline-flex items-center rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-slate-200 hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </span>
+                  </TabsTrigger>
+                ))}
               </TabsList>
               <TabsContent value="table" className="space-y-4">
                 <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-xs leading-5 text-slate-700">
-                  本批筛选口径：{bandSummary && <span>年限 {bandSummary}；</span>}结论等级由规则层依据综合分、证据置信度与必需技能覆盖率派生，仅用于安排评估优先级；“不建议推进”必须附具体原因，且可由 HR 人工覆盖。排序分不用于自动拒绝候选人。
+                  结论等级仅用于安排评估优先级，可由 HR 人工覆盖；排序分不用于自动拒绝。{bandSummary && <span>本批年限口径：{bandSummary}。</span>}
                 </div>
                 <MatchRankingTable
                   entries={selectedRun.entries}
-                  onOpenProfile={(candidateId) => setProfileCandidateId(candidateId)}
+                  onOpenProfile={openProfile}
                   onGotoDecision={gotoDecision}
+                  onGenerateGuide={(entry) => router.push(`/interview-guides?entry=${entry.id}`)}
                 />
               </TabsContent>
               <TabsContent value="card">
@@ -794,19 +899,31 @@ export function ShortlistsWorkspace() {
                   <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>短名单正在准备</AlertTitle><AlertDescription>当前批次尚无可审阅条目，请稍后刷新。</AlertDescription></Alert>
                 )}
               </TabsContent>
+              {openProfileIds.map((candidateId) => {
+                const profileCandidate = resolveProfileCandidate(candidateId);
+                const incompleteHint =
+                  profileCandidate !== null &&
+                  !candidates.some((candidate) => candidate.id === candidateId);
+                return (
+                  <TabsContent
+                    key={candidateId}
+                    value={candidateId}
+                    forceMount
+                    className="data-[state=inactive]:hidden"
+                  >
+                    <CandidateDetailPanel
+                      candidate={profileCandidate}
+                      matchRecord={resolveProfileMatchRecord(candidateId)}
+                      onBack={() => closeProfile(candidateId)}
+                      incompleteHint={incompleteHint}
+                    />
+                  </TabsContent>
+                );
+              })}
             </Tabs>
           )}
         </>
       )}
-      <CandidateDetailDialog
-        candidate={profileCandidate}
-        matchRecord={profileMatchRecord}
-        open={profileCandidateId !== null}
-        onOpenChange={(open) => {
-          if (!open) setProfileCandidateId(null);
-        }}
-        incompleteHint={profileIncomplete}
-      />
     </div>
   );
 }

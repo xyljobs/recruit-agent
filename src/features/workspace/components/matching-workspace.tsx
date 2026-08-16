@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Award,
@@ -46,6 +46,8 @@ const MatchRadarChart = dynamic(() => import('./match-radar-chart'), {
   loading: () => <Skeleton className="h-64 w-full" />,
 });
 
+const MATCH_TIMEOUT_MS = 90_000;
+
 export function MatchingWorkspace({
   initialJobId = '',
   initialCandidateId = '',
@@ -58,6 +60,18 @@ export function MatchingWorkspace({
   const [selectedCandidateId, setSelectedCandidateId] = useState(initialCandidateId);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchResult, setMatchResult] = useState<MatchRecord | null>(null);
+  const [matchElapsed, setMatchElapsed] = useState(0);
+
+  // 匹配过程计时：让用户看到操作在推进，而非静止转圈
+  useEffect(() => {
+    if (!matchLoading) return;
+    const startedAt = Date.now();
+    setMatchElapsed(0);
+    const timer = setInterval(() => {
+      setMatchElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [matchLoading]);
 
   async function handleMatch() {
     if (!selectedJobId || !selectedCandidateId) {
@@ -65,6 +79,8 @@ export function MatchingWorkspace({
       return;
     }
     setMatchLoading(true);
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => controller.abort(), MATCH_TIMEOUT_MS);
     try {
       const response = await authFetch('/api/match', {
         method: 'POST',
@@ -73,6 +89,7 @@ export function MatchingWorkspace({
           jobId: selectedJobId,
           candidateId: selectedCandidateId,
         }),
+        signal: controller.signal,
       });
       const result = await response.json();
       if (result.success) {
@@ -89,9 +106,14 @@ export function MatchingWorkspace({
         toast.error(result.error || '匹配失败');
       }
     } catch (error) {
-      console.error('匹配失败:', error);
-      toast.error('匹配失败，请重试');
+      if (controller.signal.aborted) {
+        toast.error('匹配耗时过长已中止，请稍后重试');
+      } else {
+        console.error('匹配失败:', error);
+        toast.error('匹配失败，请重试');
+      }
     } finally {
+      clearTimeout(timeoutTimer);
       setMatchLoading(false);
     }
   }
@@ -138,7 +160,7 @@ export function MatchingWorkspace({
             </Select>
           </div>
           <Button
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            className="w-full"
             onClick={handleMatch}
             disabled={
               matchLoading || !selectedJobId || !selectedCandidateId
@@ -152,10 +174,34 @@ export function MatchingWorkspace({
             ) : (
               <>
                 <Target className="h-4 w-4 mr-2" />
-                开始智能匹配
+                AI智能匹配
               </>
             )}
           </Button>
+          {matchLoading && (
+            <div className="mt-3 space-y-2 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
+              <p className="flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                正在读取职位与候选人信息，计算基础评分…
+              </p>
+              <p className="flex items-center gap-2">
+                {matchElapsed >= 3 ? (
+                  <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                ) : (
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                )}
+                {matchElapsed >= 3
+                  ? `基础评分已完成，AI 正在生成补充分析（已 ${matchElapsed} 秒）…`
+                  : '等待 AI 补充分析…'}
+              </p>
+              {matchElapsed >= 30 && (
+                <p className="flex items-center gap-2 text-amber-600">
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  AI 分析耗时较长，仍在进行中，超过 {Math.round(MATCH_TIMEOUT_MS / 1000)} 秒将自动中止
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -177,7 +223,7 @@ export function MatchingWorkspace({
                     >
                       {matchResult.overall_score}
                     </p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-muted-foreground">
                       {getScoreLabel(matchResult.overall_score || 0)}
                     </p>
                   </div>
@@ -236,11 +282,11 @@ export function MatchingWorkspace({
                         <span className={getScoreColor(item.score || 0)}>
                           {item.icon}
                         </span>
-                        <span className="text-xs text-gray-600">
+                        <span className="text-xs text-muted-foreground">
                           {item.label}
                         </span>
                       </div>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-muted-foreground">
                         {item.weight}
                       </span>
                     </div>
@@ -261,7 +307,7 @@ export function MatchingWorkspace({
                         <CheckCircle2 className="h-4 w-4" />
                         匹配优势
                       </h4>
-                      <ul className="list-disc list-inside space-y-1 text-sm text-gray-600">
+                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                         {matchResult.match_details.strengths.map((item) => (
                           <li key={item}>{item}</li>
                         ))}
@@ -274,7 +320,7 @@ export function MatchingWorkspace({
                         <XCircle className="h-4 w-4" />
                         需关注
                       </h4>
-                      <ul className="list-disc list-inside space-y-1 text-sm text-gray-600">
+                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                         {matchResult.match_details.gaps.map((item) => (
                           <li key={item}>{item}</li>
                         ))}
@@ -286,7 +332,7 @@ export function MatchingWorkspace({
                       <h4 className="font-semibold text-blue-700 mb-2">
                         面试建议
                       </h4>
-                      <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
+                      <p className="text-sm text-muted-foreground bg-blue-50 p-3 rounded-lg">
                         {matchResult.match_details.recommendations}
                       </p>
                     </div>
@@ -297,13 +343,13 @@ export function MatchingWorkspace({
                         AI 补充证据
                       </h4>
                       {matchResult.match_details.llm_supplement.summary && (
-                        <p className="text-sm text-gray-600 mb-2">
+                        <p className="text-sm text-muted-foreground mb-2">
                           {matchResult.match_details.llm_supplement.summary}
                         </p>
                       )}
                       {matchResult.match_details.llm_supplement.evidence.length >
                         0 && (
-                        <ul className="space-y-2 text-sm text-gray-600">
+                        <ul className="space-y-2 text-sm text-muted-foreground">
                           {matchResult.match_details.llm_supplement.evidence.map(
                             (item, index) => (
                               <li
@@ -314,7 +360,7 @@ export function MatchingWorkspace({
                                   {item.dimension}：
                                 </span>
                                 {item.finding}
-                                <span className="text-xs text-gray-400 ml-2">
+                                <span className="text-xs text-muted-foreground ml-2">
                                   来源：{item.source}
                                 </span>
                               </li>
@@ -328,8 +374,8 @@ export function MatchingWorkspace({
               )}
             </div>
           ) : (
-            <div className="h-[400px] flex flex-col items-center justify-center text-gray-400">
-              <Target className="h-16 w-16 mb-4 text-gray-200" />
+            <div className="h-[400px] flex flex-col items-center justify-center text-muted-foreground">
+              <Target className="h-16 w-16 mb-4 text-muted-foreground" />
               <p>选择职位和候选人后，点击「开始智能匹配」</p>
             </div>
           )}

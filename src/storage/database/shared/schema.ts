@@ -202,6 +202,7 @@ export const candidates = pgTable(
       duration_months: number;
     }>>(), // 工作经历
     resume_text: text("resume_text"),
+    resume_summary: text("resume_summary"), // AES 加密的简历结构化摘要缓存（JSON 字符串）
     notes: text("notes"),
     // HMAC 签名字段（用于加密字段的精确检索）
     email_hmac: varchar("email_hmac", { length: 64 }), // HMAC-SHA256 of email
@@ -545,6 +546,11 @@ export const shortlistRuns = pgTable(
     qualified_by: varchar("qualified_by", { length: 36 }).references(() => users.id, { onDelete: "set null" }),
     qualification_client_event_id: varchar("qualification_client_event_id", { length: 36 }),
     error_message: text("error_message"),
+    progress: jsonb("progress").$type<{
+      stage: string;
+      scored_candidates?: number;
+      total_candidates?: number;
+    } | null>(),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

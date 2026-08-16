@@ -188,7 +188,7 @@ export function TeamWorkspace() {
             邀请同事加入本组织。受邀人无账号时凭一次性邀请码注册；已有账号的用户在下方直接接受邀请码即可加入，无需重新注册。
           </p>
         </div>
-        <Button variant="outline" onClick={() => void loadInvitations()} disabled={loading}>
+        <Button onClick={() => void loadInvitations()} disabled={loading}>
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新状态
         </Button>
       </div>
@@ -203,7 +203,7 @@ export function TeamWorkspace() {
             <div className="space-y-2">
               <Label htmlFor="invite-email">受邀邮箱</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="invite-email"
                   type="email"
@@ -262,7 +262,7 @@ export function TeamWorkspace() {
                 onChange={(event) => setAcceptToken(event.target.value)}
               />
             </div>
-            <Button type="submit" variant="outline" disabled={accepting}>
+            <Button type="submit" disabled={accepting}>
               {accepting ? '加入中...' : '接受邀请并加入'}
             </Button>
           </form>
@@ -316,7 +316,7 @@ export function TeamWorkspace() {
                         {status === 'pending' ? (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700">
+                              <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive">
                                 <Trash2 className="mr-1 h-3.5 w-3.5" />撤销
                               </Button>
                             </AlertDialogTrigger>
@@ -330,6 +330,7 @@ export function TeamWorkspace() {
                               <AlertDialogFooter>
                                 <AlertDialogCancel>取消</AlertDialogCancel>
                                 <AlertDialogAction
+                                  variant="destructive"
                                   disabled={revokingId === invitation.id}
                                   onClick={() => void handleRevoke(invitation)}
                                 >

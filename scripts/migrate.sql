@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   current_company VARCHAR(255),
   current_position VARCHAR(255),
   resume_text TEXT,
+  resume_summary TEXT,
   notes TEXT,
   current_city VARCHAR(100),
   preferred_locations JSONB DEFAULT '[]',
@@ -120,6 +121,10 @@ CREATE INDEX IF NOT EXISTS candidates_email_idx ON candidates(email);
 CREATE INDEX IF NOT EXISTS candidates_current_city_idx ON candidates(current_city);
 CREATE INDEX IF NOT EXISTS candidates_email_hmac_idx ON candidates(email_hmac);
 CREATE INDEX IF NOT EXISTS candidates_phone_hmac_idx ON candidates(phone_hmac);
+
+-- 简历结构化摘要缓存（AES 加密的 JSON 字符串）；resume_text 更新时置空
+ALTER TABLE candidates
+ADD COLUMN IF NOT EXISTS resume_summary TEXT;
 
 -- ============================================
 -- 4. 匹配记录表
@@ -1701,6 +1706,7 @@ BEGIN
     email_hmac = NULL,
     phone_hmac = NULL,
     resume_text = NULL,
+    resume_summary = NULL,
     resume_url = NULL,
     skills = '[]'::JSONB,
     current_company = NULL,
@@ -2655,6 +2661,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS shortlist_runs_qualification_client_event_uniq
   WHERE qualification_client_event_id IS NOT NULL;
 ALTER TABLE shortlist_runs
   ADD COLUMN IF NOT EXISTS scoring_weights_version VARCHAR(100) NOT NULL DEFAULT 'match-weights-v1';
+ALTER TABLE shortlist_runs
+  ADD COLUMN IF NOT EXISTS progress JSONB;
 
 CREATE TABLE IF NOT EXISTS shortlist_entries (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3313,6 +3321,54 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION update_shortlist_run_progress(
+  p_organization_id VARCHAR,
+  p_shortlist_run_id VARCHAR,
+  p_progress JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_run shortlist_runs%ROWTYPE;
+BEGIN
+  IF p_organization_id IS NULL
+    OR p_shortlist_run_id IS NULL
+    OR p_progress IS NULL
+    OR jsonb_typeof(p_progress) <> 'object' THEN
+    RAISE EXCEPTION 'organization, shortlist run and progress object are required' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT * INTO v_run
+  FROM shortlist_runs
+  WHERE id = p_shortlist_run_id
+    AND organization_id = p_organization_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'shortlist run not found' USING ERRCODE = 'P0002';
+  END IF;
+  IF v_run.status NOT IN ('pending', 'running') THEN
+    RETURN jsonb_build_object(
+      'shortlist_run_id', v_run.id,
+      'status', v_run.status,
+      'updated', false
+    );
+  END IF;
+
+  UPDATE shortlist_runs
+  SET progress = p_progress, updated_at = NOW()
+  WHERE id = p_shortlist_run_id;
+
+  RETURN jsonb_build_object(
+    'shortlist_run_id', p_shortlist_run_id,
+    'status', v_run.status,
+    'updated', true
+  );
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION record_shortlist_decision(
   p_shortlist_entry_id VARCHAR,
   p_decision VARCHAR,
@@ -3854,6 +3910,7 @@ $$;
 
 REVOKE ALL ON FUNCTION create_shortlist_batch(VARCHAR, JSONB, INTEGER, VARCHAR) FROM PUBLIC;
 REVOKE ALL ON FUNCTION finalize_shortlist_run(VARCHAR, VARCHAR, JSONB, INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION update_shortlist_run_progress(VARCHAR, VARCHAR, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION record_shortlist_decision(VARCHAR, VARCHAR, VARCHAR, TEXT, VARCHAR, TIMESTAMP WITH TIME ZONE) FROM PUBLIC;
 REVOKE ALL ON FUNCTION qualify_shortlist_run(VARCHAR, VARCHAR) FROM PUBLIC;
 REVOKE ALL ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, JSONB) FROM PUBLIC;
@@ -3861,6 +3918,7 @@ REVOKE ALL ON FUNCTION append_match_status_event(VARCHAR, VARCHAR, TEXT) FROM PU
 
 GRANT EXECUTE ON FUNCTION create_shortlist_batch(VARCHAR, JSONB, INTEGER, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION finalize_shortlist_run(VARCHAR, VARCHAR, JSONB, INTEGER) TO service_role;
+GRANT EXECUTE ON FUNCTION update_shortlist_run_progress(VARCHAR, VARCHAR, JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION record_shortlist_decision(VARCHAR, VARCHAR, VARCHAR, TEXT, VARCHAR, TIMESTAMP WITH TIME ZONE) TO authenticated;
 GRANT EXECUTE ON FUNCTION qualify_shortlist_run(VARCHAR, VARCHAR) TO authenticated;
 GRANT EXECUTE ON FUNCTION record_recruiting_outcome(VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, VARCHAR, TEXT, VARCHAR, VARCHAR, JSONB) TO authenticated;
@@ -4053,6 +4111,11 @@ BEGIN
           job_change_frequency = COALESCE(v_candidate_input.job_change_frequency, job_change_frequency),
           work_history = COALESCE(v_candidate_input.work_history, work_history),
           resume_text = COALESCE(v_candidate_input.resume_text, resume_text),
+          -- 简历正文被同步更新时，已缓存的结构化摘要随之失效，需重新生成
+          resume_summary = CASE
+            WHEN v_candidate_input.resume_text IS NOT NULL THEN NULL
+            ELSE resume_summary
+          END,
           notes = COALESCE(v_candidate_input.notes, notes),
           updated_at = NOW()
       WHERE id = v_local_entity_id
@@ -5467,7 +5530,11 @@ FOR EACH ROW EXECUTE FUNCTION prevent_authorization_reactivation();
 
 ALTER FUNCTION create_candidate_with_authorization_and_audit(JSONB, JSONB)
   SECURITY DEFINER;
-REVOKE INSERT, UPDATE, DELETE ON candidates FROM authenticated;
+-- 候选人 INSERT/UPDATE 走 SECURITY DEFINER RPC（create_candidate_with_authorization_and_audit /
+-- revoke_candidate_authorization），故 revoke 直接写权限；DELETE 由 API 层守门（仅无匹配/短名单/复盘
+-- 留痕的候选人允许硬删）+ candidates_tenant_delete RLS 租户隔离，须保留 authenticated 的 DELETE 权限
+REVOKE INSERT, UPDATE ON candidates FROM authenticated;
+GRANT DELETE ON candidates TO authenticated;
 REVOKE INSERT, UPDATE, DELETE ON authorization_records FROM authenticated;
 
 CREATE OR REPLACE FUNCTION record_automated_decision_objection(
@@ -5921,6 +5988,55 @@ $$;
 REVOKE ALL ON FUNCTION create_interview_guide(VARCHAR, VARCHAR, VARCHAR, JSONB, JSONB, JSONB, JSONB, JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION create_interview_guide(VARCHAR, VARCHAR, VARCHAR, JSONB, JSONB, JSONB, JSONB, JSONB) TO authenticated;
 
+-- 提纲编辑保存（HR 增删改题目 + 记录答案）走 SECURITY DEFINER RPC：租户 + 授权双重门禁
+CREATE OR REPLACE FUNCTION update_interview_guide(
+  p_guide_id VARCHAR,
+  p_questions JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_organization_id VARCHAR(36) := current_organization_id();
+  v_user_id VARCHAR(36) := current_app_user_id();
+  v_role VARCHAR(20) := current_app_role();
+  v_guide interview_guides%ROWTYPE;
+BEGIN
+  IF v_organization_id IS NULL OR v_user_id IS NULL OR v_role NOT IN ('hr', 'admin') THEN
+    RAISE EXCEPTION 'authenticated recruiter context required' USING ERRCODE = '28000';
+  END IF;
+  IF jsonb_typeof(COALESCE(p_questions, '{}'::JSONB)) <> 'object' THEN
+    RAISE EXCEPTION 'invalid interview guide questions' USING ERRCODE = '22023';
+  END IF;
+  SELECT * INTO v_guide FROM interview_guides
+  WHERE id = p_guide_id AND organization_id = v_organization_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'interview guide not found' USING ERRCODE = 'P0002';
+  END IF;
+  PERFORM 1 FROM authorization_records
+  WHERE organization_id = v_organization_id
+    AND candidate_id = v_guide.candidate_id
+    AND is_active = true
+    AND evidence_status = 'verified'
+    AND authorized_at <= NOW()
+    AND processing_expires_at > NOW();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate authorization is no longer processable' USING ERRCODE = '55000';
+  END IF;
+  UPDATE interview_guides
+  SET questions = p_questions
+  WHERE id = p_guide_id
+  RETURNING * INTO v_guide;
+  RETURN to_jsonb(v_guide);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION update_interview_guide(VARCHAR, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION update_interview_guide(VARCHAR, JSONB) TO authenticated;
+
 -- P2 新增速率限制 scope 登记（consume_api_rate_limit 两个 CASE 分支），并修复 jd:generate 漏注册
 DROP FUNCTION IF EXISTS consume_api_rate_limit(VARCHAR);
 
@@ -5970,8 +6086,10 @@ BEGIN
       WHEN 'communication-briefs:create' THEN 20
       WHEN 'interview:guide' THEN 10
       WHEN 'interview:guide:read' THEN 120
+      WHEN 'interview:guide:write' THEN 60
       WHEN 'interview:bank:read' THEN 120
       WHEN 'interview:bank:write' THEN 30
+      WHEN 'candidates:resume-summary' THEN 10
       WHEN 'shortlists:create' THEN 10
       WHEN 'shortlists:read' THEN 120
       WHEN 'shortlists:qualify' THEN 10
@@ -6002,8 +6120,10 @@ BEGIN
       WHEN 'communication-briefs:create' THEN 60
       WHEN 'interview:guide' THEN 300
       WHEN 'interview:guide:read' THEN 60
+      WHEN 'interview:guide:write' THEN 60
       WHEN 'interview:bank:read' THEN 60
       WHEN 'interview:bank:write' THEN 60
+      WHEN 'candidates:resume-summary' THEN 300
       WHEN 'shortlists:create' THEN 60
       WHEN 'shortlists:read' THEN 60
       WHEN 'shortlists:qualify' THEN 60

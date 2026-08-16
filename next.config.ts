@@ -17,6 +17,21 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // 页面 HTML 禁用浏览器缓存：重建重启后普通刷新即可看到新版本，
+  // 无需手动强制刷新；/_next 静态资源与 /api 接口不受影响，仍保留原有缓存策略。
+  async headers() {
+    return [
+      {
+        source: '/((?!_next/|api/).*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'private, no-cache, no-store, must-revalidate',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

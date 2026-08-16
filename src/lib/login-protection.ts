@@ -116,6 +116,8 @@ export async function recordLoginSuccess(
   const { identifierHash } = attemptIdentity(request, email);
   await recordAttempt(request, email, true);
   const [userResult, attemptsResult] = await Promise.all([
+    // 多组织模型：users.organization_id 仅表示主组织，按它过滤会在登录非主组织时 0 行更新；
+    // 租户归属已在登录流程经 organization_members 校验，这里只按用户 id 更新自身行
     supabase
       .from('users')
       .update({
@@ -123,8 +125,7 @@ export async function recordLoginSuccess(
         locked_until: null,
         last_login_at: new Date().toISOString(),
       })
-      .eq('id', userId)
-      .eq('organization_id', organizationId),
+      .eq('id', userId),
     supabase
       .from('auth_login_attempts')
       .delete()

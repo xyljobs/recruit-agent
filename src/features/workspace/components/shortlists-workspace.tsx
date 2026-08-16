@@ -509,8 +509,8 @@ function ShortlistConceptGuide() {
             <h4 className="text-sm font-semibold text-slate-900">短名单从哪来</h4>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
               <li>在<Link href="/jobs" className="mx-0.5 font-medium text-blue-700 underline underline-offset-4">职位与标准</Link>中解析 JD、确认用人标准；</li>
-              <li>系统自动搜索候选人并做批量智能匹配；</li>
-              <li>匹配结果按职位生成短名单批次，出现在本页。</li>
+              <li>在<Link href="/candidates" className="mx-0.5 font-medium text-blue-700 underline underline-offset-4">候选人库</Link>中完成简历入库，并关联应聘职位；</li>
+              <li>在本页选择职位，系统才会对已入库且仍绑定该职位的候选人进行智能匹配并生成短名单。</li>
             </ol>
           </div>
           <div className="rounded-lg border border-blue-100 bg-white p-4">
@@ -534,7 +534,9 @@ export function ShortlistsWorkspace() {
   const { jobs, candidates, matchRecords } = useWorkspaceData();
   const [runs, setRuns] = useState<ShortlistRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState('');
+  const [selectedJobId, setSelectedJobId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [creatingShortlist, setCreatingShortlist] = useState(false);
   const [qualifying, setQualifying] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
   const [profileCandidateId, setProfileCandidateId] = useState<string | null>(null);
@@ -557,6 +559,30 @@ export function ShortlistsWorkspace() {
   }, []);
 
   useEffect(() => { void loadRuns(); }, [loadRuns]);
+  const activeJobs = useMemo(
+    () => jobs.filter((job) => job.status === 'active'),
+    [jobs],
+  );
+  const selectedJob = useMemo(
+    () => activeJobs.find((job) => job.id === selectedJobId) ?? null,
+    [activeJobs, selectedJobId],
+  );
+  const boundCandidates = useMemo(
+    () => candidates.filter(
+      (candidate) => candidate.source_job_id === selectedJobId
+        && candidate.source_job_binding_status === 'active',
+    ),
+    [candidates, selectedJobId],
+  );
+
+  useEffect(() => {
+    setSelectedJobId((current) => (
+      current && activeJobs.some((job) => job.id === current)
+        ? current
+        : activeJobs[0]?.id ?? ''
+    ));
+  }, [activeJobs]);
+
   const selectedRun = useMemo(() => runs.find((run) => run.id === selectedRunId) ?? null, [runs, selectedRunId]);
   const reviewedCount = selectedRun?.entries.filter((entry) => entry.human_decision !== 'unreviewed').length ?? 0;
   const acceptedCount = selectedRun?.entries.filter((entry) => entry.human_decision === 'accepted').length ?? 0;
@@ -653,6 +679,42 @@ export function ShortlistsWorkspace() {
     }
   }
 
+  async function createShortlist() {
+    if (!selectedJob) {
+      toast.error('请先选择已启用的职位');
+      return;
+    }
+    if (boundCandidates.length === 0) {
+      toast.error('该职位还没有已入库且有效绑定的候选人');
+      return;
+    }
+
+    setCreatingShortlist(true);
+    try {
+      const response = await authFetch('/api/shortlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_id: selectedJob.id,
+          candidate_ids: boundCandidates.map((candidate) => candidate.id),
+          top_n: Math.min(10, boundCandidates.length),
+          client_event_id: crypto.randomUUID(),
+        }),
+      });
+      const result: { success?: boolean; data?: { shortlist_run_id?: string }; error?: string } = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '短名单任务提交失败');
+      }
+      toast.success('智能匹配已开始，完成后可在本页审阅短名单');
+      await loadRuns();
+      if (result.data?.shortlist_run_id) setSelectedRunId(result.data.shortlist_run_id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '短名单任务提交失败');
+    } finally {
+      setCreatingShortlist(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -660,10 +722,43 @@ export function ShortlistsWorkspace() {
         <Button variant="outline" onClick={() => void loadRuns()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />刷新短名单</Button>
       </div>
 
+      <Card className="border-blue-200 bg-blue-50/40 shadow-none">
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+          <div className="space-y-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">第三步：匹配已入库候选人</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">选择职位后，仅匹配已入库且仍有效关联该职位的候选人。</p>
+            </div>
+            <Label htmlFor="shortlist-job">选择职位</Label>
+            <Select value={selectedJobId} onValueChange={setSelectedJobId} disabled={activeJobs.length === 0 || creatingShortlist}>
+              <SelectTrigger id="shortlist-job" className="max-w-xl bg-white">
+                <SelectValue placeholder="选择要匹配的职位" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeJobs.map((job) => (
+                  <SelectItem key={job.id} value={job.id}>
+                    {job.title}{job.department ? ` · ${job.department}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-slate-500">
+              {selectedJob
+                ? `当前职位已有 ${boundCandidates.length} 位候选人完成入库并有效绑定。`
+                : '请先在第一步启用职位，并在第二步完成候选人入库。'}
+            </p>
+          </div>
+          <Button onClick={() => void createShortlist()} disabled={!selectedJob || boundCandidates.length === 0 || creatingShortlist}>
+            {creatingShortlist ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            {creatingShortlist ? '提交中…' : '开始智能匹配'}
+          </Button>
+        </CardContent>
+      </Card>
+
       <ShortlistConceptGuide />
 
       {loading ? <div className="space-y-4"><Skeleton className="h-24 rounded-xl" /><Skeleton className="h-96 rounded-xl" /></div> : runs.length === 0 ? (
-        <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>还没有短名单</AlertTitle><AlertDescription>请先在<Link href="/jobs" className="mx-1 font-medium text-blue-700 underline underline-offset-4">职位与标准</Link>中确认职位，再发起短名单生成。</AlertDescription></Alert>
+        <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>还没有短名单</AlertTitle><AlertDescription>请先确认职位、完成候选人入库，然后在上方选择职位开始智能匹配。</AlertDescription></Alert>
       ) : (
         <>
           <Card className="gap-4 border-slate-200 shadow-none">

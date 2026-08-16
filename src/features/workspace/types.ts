@@ -46,6 +46,8 @@ export interface Job {
   completeness: number | null;
   missing_fields: string[] | null;
   raw_jd: string | null;
+  // 已生成的发布版职位描述（持久化缓存）：非空时首屏直接复用，避免切页/刷新后静默重算导致内容变化
+  publish_jd?: string | null;
   screening_rubric?: ScreeningRubric | null;
   status: string;
   created_at: string;
@@ -65,7 +67,18 @@ export interface Candidate {
   education: string | null;
   skills: string[] | null;
   resume_text: string | null;
+  // 原始简历文件（私有存储，经签名 URL 访问；未上传时为 null）
+  resume_file_path?: string | null;
+  resume_file_name?: string | null;
+  resume_file_size?: number | null;
   created_at: string;
+  // 入库归属：录入 HR 与首次关联职位（绑定有时效性）
+  created_by?: string | null;
+  created_by_name?: string | null;
+  source_job_id?: string | null;
+  source_job_bound_at?: string | null;
+  source_job_binding_status?: 'active' | 'expired' | null;
+  source_job_binding_expired_at?: string | null;
   authorization: CandidateAuthorizationEvidence | null;
 }
 
@@ -200,6 +213,7 @@ export interface CandidateForm {
   salary_max: number;
   availability: string;
   job_change_frequency: number | null;
+  source_job_id?: string | null;
   authorization: CandidateAuthorizationForm;
 }
 

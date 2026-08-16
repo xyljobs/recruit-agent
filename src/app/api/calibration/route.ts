@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { getAdminRequestContext } from '@/lib/auth-server';
 import { SMALL_JSON_BODY_LIMIT, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
+import {
+  computeGuideHitStats,
+  type GuideCalibrationEvent,
+} from '@/lib/recruiting/guide-calibration';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({
@@ -41,5 +45,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: result.data });
   } catch (error) {
     return apiErrorResponse(error, '校准操作失败');
+  }
+}
+
+// 校准输入：提纲专项题命中率聚合（P3 回流）。
+// 只读取本组织 interview_feedback 事件的 metadata，不写库；
+// 命中率仅作展示与人工判断依据，不自动调整权重（口径 6）。
+export async function GET(request: NextRequest) {
+  try {
+    const { supabase, user } = await getAdminRequestContext(request);
+    const { data, error } = await supabase
+      .from('recruiting_outcome_events')
+      .select('event_type, metadata')
+      .eq('organization_id', user.organizationId)
+      .eq('event_type', 'interview_feedback')
+      .order('occurred_at', { ascending: false })
+      .limit(500);
+    if (error) throw new Error(`查询面试反馈事件失败: ${error.message}`);
+
+    const stats = computeGuideHitStats((data ?? []) as GuideCalibrationEvent[]);
+    return NextResponse.json({
+      success: true,
+      data: { guide_hit_stats: stats },
+    });
+  } catch (error) {
+    return apiErrorResponse(error, '获取校准输入失败');
   }
 }

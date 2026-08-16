@@ -174,13 +174,28 @@ export async function POST(request: NextRequest) {
     }
 
     // 去重：与候选人创建相同的 HMAC 检索（email/phone 精确匹配）
+    // 命中时返回历史比对摘要：入库时间、录入人、绑定职位与最近一次匹配结论
     const emailHmac = generateHmac(extracted.email);
     const phoneHmac = generateHmac(extracted.phone);
-    let duplicates: { id: string; name: string }[] = [];
+    let duplicates: {
+      id: string;
+      name: string;
+      created_at: string | null;
+      created_by_name: string | null;
+      source_job_title: string | null;
+      source_job_binding_status: string | null;
+      last_match: {
+        overall_score: number | null;
+        status: string | null;
+        job_title: string | null;
+      } | null;
+    }[] = [];
     if (emailHmac || phoneHmac) {
       let query = supabase
         .from('candidates')
-        .select('id, name')
+        .select(
+          'id, name, created_at, created_by, source_job_id, source_job_binding_status',
+        )
         .eq('organization_id', user.organizationId);
       if (emailHmac && phoneHmac) {
         query = query.or(
@@ -195,12 +210,109 @@ export async function POST(request: NextRequest) {
       if (error) {
         throw new Error(`重复校验失败: ${error.message}`);
       }
-      duplicates = (data ?? []).map(
-        (row: { id: string; name: string | null }) => ({
+
+      const rows = (data ?? []) as Array<{
+        id: string;
+        name: string | null;
+        created_at: string | null;
+        created_by: string | null;
+        source_job_id: string | null;
+        source_job_binding_status: string | null;
+      }>;
+
+      const creatorIds = [
+        ...new Set(
+          rows
+            .map((row) => row.created_by)
+            .filter((value): value is string => typeof value === 'string'),
+        ),
+      ];
+      const candidateIds = rows.map((row) => row.id);
+
+      const [creatorResult, matchResult] = await Promise.all([
+        creatorIds.length > 0
+          ? supabase.from('users').select('id, name').in('id', creatorIds)
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from('match_records')
+          .select('candidate_id, job_id, overall_score, status, created_at')
+          .in('candidate_id', candidateIds)
+          .order('created_at', { ascending: false })
+          .limit(20),
+      ]);
+      if (creatorResult.error) {
+        throw new Error(`查询录入人失败: ${creatorResult.error.message}`);
+      }
+      if (matchResult.error) {
+        throw new Error(`查询匹配记录失败: ${matchResult.error.message}`);
+      }
+
+      const jobIds = [
+        ...new Set(
+          [
+            ...rows.map((row) => row.source_job_id),
+            ...(matchResult.data ?? []).map(
+              (match: { job_id: string | null }) => match.job_id,
+            ),
+          ].filter((value): value is string => typeof value === 'string'),
+        ),
+      ];
+      const jobResult = jobIds.length > 0
+        ? await supabase
+            .from('job_requirements')
+            .select('id, title')
+            .in('id', jobIds)
+        : { data: [], error: null };
+      if (jobResult.error) {
+        throw new Error(`查询职位失败: ${jobResult.error.message}`);
+      }
+
+      const nameByUserId = new Map<string, string>();
+      for (const creator of creatorResult.data ?? []) {
+        nameByUserId.set(creator.id, creator.name);
+      }
+      const titleByJobId = new Map<string, string>();
+      for (const job of jobResult.data ?? []) {
+        titleByJobId.set(job.id, job.title);
+      }
+      const latestMatchByCandidate = new Map<
+        string,
+        { overall_score: number | null; status: string | null; job_id: string | null }
+      >();
+      for (const match of matchResult.data ?? []) {
+        if (!latestMatchByCandidate.has(match.candidate_id)) {
+          latestMatchByCandidate.set(match.candidate_id, {
+            overall_score: match.overall_score,
+            status: match.status,
+            job_id: match.job_id,
+          });
+        }
+      }
+
+      duplicates = rows.map((row) => {
+        const lastMatch = latestMatchByCandidate.get(row.id);
+        return {
           id: row.id,
           name: maskName(decryptField(row.name)),
-        }),
-      );
+          created_at: row.created_at,
+          created_by_name: row.created_by
+            ? (nameByUserId.get(row.created_by) ?? null)
+            : null,
+          source_job_title: row.source_job_id
+            ? (titleByJobId.get(row.source_job_id) ?? null)
+            : null,
+          source_job_binding_status: row.source_job_binding_status,
+          last_match: lastMatch
+            ? {
+                overall_score: lastMatch.overall_score,
+                status: lastMatch.status,
+                job_title: lastMatch.job_id
+                  ? (titleByJobId.get(lastMatch.job_id) ?? null)
+                  : null,
+              }
+            : null,
+        };
+      });
     }
 
     return NextResponse.json({

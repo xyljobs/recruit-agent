@@ -6,6 +6,7 @@ import {
   Briefcase,
   Building2,
   GraduationCap,
+  LoaderCircle,
   Mail,
   Phone,
   Plus,
@@ -36,7 +37,12 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
 import { AUTHORIZATION_NOTICE_VERSION } from '@/lib/privacy/authorization-shared';
+import mammoth from 'mammoth';
 import { useWorkspaceData } from '../hooks/use-workspace-data';
+import {
+  extractResumeTextFromFile,
+  uploadCandidateResumeFile,
+} from '../lib/resume-file';
 import type { Candidate, CandidateForm, MatchRecord } from '../types';
 
 interface DecisionExplanation {
@@ -60,9 +66,28 @@ const AUTHORIZATION_SOURCE_LABELS: Record<string, string> = {
   other: '其他可核验渠道',
 };
 
+const MATCH_STATUS_LABELS: Record<string, string> = {
+  pending: '待接触',
+  contacted: '已联系',
+  interviewing: '面试中',
+  offered: '已发Offer',
+  hired: '已录用',
+  rejected: '已拒绝',
+  withdrawn: '已撤回',
+};
+
 export interface DuplicateCandidateHint {
   id: string;
   name: string;
+  created_at: string | null;
+  created_by_name: string | null;
+  source_job_title: string | null;
+  source_job_binding_status: 'active' | 'expired' | null;
+  last_match: {
+    overall_score: number | null;
+    status: string | null;
+    job_title: string | null;
+  } | null;
 }
 
 export const EMPTY_CANDIDATE_FORM: CandidateForm = {
@@ -105,13 +130,17 @@ export function CandidateFormDialog({
   onOpenChange: controlledOnOpenChange,
   initialValues,
   duplicates,
+  lockedJobId,
+  hideTrigger,
 }: {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   initialValues?: CandidateForm | null;
   duplicates?: DuplicateCandidateHint[];
+  lockedJobId?: string | null;
+  hideTrigger?: boolean;
 } = {}) {
-  const { reloadCandidates } = useWorkspaceData();
+  const { reloadCandidates, jobs } = useWorkspaceData();
   const [internalOpen, setInternalOpen] = useState(false);
   const [form, setForm] = useState<CandidateForm>(EMPTY_CANDIDATE_FORM);
   const [skillInput, setSkillInput] = useState('');
@@ -120,18 +149,20 @@ export function CandidateFormDialog({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
 
-  // 快捷入库预填：initialValues 变化时重置表单（授权子表单做深合并）
+  // 快捷入库预填：initialValues 变化时重置表单（授权子表单做深合并）；
+  // 从职位页发起入库时锁定职位，强制绑定该职位
   useEffect(() => {
-    if (!initialValues) return;
+    if (!initialValues && !lockedJobId) return;
     setForm({
       ...EMPTY_CANDIDATE_FORM,
       ...initialValues,
+      source_job_id: lockedJobId ?? initialValues?.source_job_id ?? null,
       authorization: {
         ...EMPTY_CANDIDATE_FORM.authorization,
-        ...initialValues.authorization,
+        ...(initialValues?.authorization ?? {}),
       },
     });
-  }, [initialValues]);
+  }, [initialValues, lockedJobId]);
 
   // 重复提示切换时重置二次确认
   useEffect(() => {
@@ -160,6 +191,10 @@ export function CandidateFormDialog({
   async function handleSubmit() {
     if (!form.name.trim()) {
       toast.error('请填写候选人姓名');
+      return;
+    }
+    if (!form.source_job_id) {
+      toast.error('请选择关联职位（候选人入库需绑定职位）');
       return;
     }
     if (duplicates && duplicates.length > 0 && !duplicateConfirmed) {
@@ -246,12 +281,14 @@ export function CandidateFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
-          <Plus className="h-4 w-4 mr-2" />
-          添加候选人
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4 mr-2" />
+            添加候选人
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>添加候选人</DialogTitle>
@@ -264,8 +301,51 @@ export function CandidateFormDialog({
             <AlertDescription className="space-y-2">
               <p>
                 检测到库中已有记录：{duplicates.map((item) => item.name).join('、')}
-                。请核对后决定是否继续保存。
+                。请核对以下历史信息后决定是否继续保存：
               </p>
+              <div className="space-y-2">
+                {duplicates.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-md border border-red-200 bg-white/70 p-2 text-xs space-y-1"
+                  >
+                    <p className="font-medium text-slate-900">
+                      {item.name}
+                      <span className="ml-2 font-normal text-gray-500">
+                        {item.created_at
+                          ? `${new Date(item.created_at).toLocaleDateString('zh-CN')} 入库`
+                          : '入库时间未知'}
+                      </span>
+                    </p>
+                    {item.created_by_name && (
+                      <p>录入人：{item.created_by_name}</p>
+                    )}
+                    {item.source_job_title && (
+                      <p>
+                        曾绑定职位：{item.source_job_title}
+                        {item.source_job_binding_status === 'expired' && (
+                          <span className="ml-1 text-amber-600">（绑定已过期）</span>
+                        )}
+                      </p>
+                    )}
+                    {item.last_match && (
+                      <p>
+                        最近匹配：{item.last_match.job_title ?? '未知职位'}
+                        {item.last_match.overall_score !== null && (
+                          <span className="ml-1 font-medium">
+                            {item.last_match.overall_score}分
+                          </span>
+                        )}
+                        {item.last_match.status && (
+                          <span className="ml-1">
+                            · {MATCH_STATUS_LABELS[item.last_match.status] ?? item.last_match.status}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
               <div className="flex items-start gap-2">
                 <input
                   type="checkbox"
@@ -287,6 +367,35 @@ export function CandidateFormDialog({
           </Alert>
         )}
         <div className="grid gap-4 py-4">
+          <div>
+            <Label>关联职位 *</Label>
+            <Select
+              value={form.source_job_id ?? ''}
+              onValueChange={(source_job_id) =>
+                setForm((current) => ({ ...current, source_job_id }))
+              }
+              disabled={Boolean(lockedJobId)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择候选人应聘的职位" />
+              </SelectTrigger>
+              <SelectContent>
+                {jobs
+                  .filter((job) => job.status === 'active')
+                  .map((job) => (
+                    <SelectItem key={job.id} value={job.id}>
+                      {job.title}
+                      {job.department ? ` · ${job.department}` : ''}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-400 mt-1">
+              {lockedJobId
+                ? '已从职位发起入库，候选人将绑定该职位'
+                : '候选人入库必须绑定职位；职位关闭或招聘定论后绑定自动过期'}
+            </p>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="name">姓名 *</Label>
@@ -931,11 +1040,73 @@ export function CandidateDetailDialog({
   onOpenChange: (open: boolean) => void;
   incompleteHint?: boolean;
 }) {
-  const { reloadMatchRecords } = useWorkspaceData();
+  const { reloadMatchRecords, jobs } = useWorkspaceData();
   const [requestReference, setRequestReference] = useState('');
   const [decisionExplanation, setDecisionExplanation] =
     useState<DecisionExplanation | null>(null);
   const [rightsLoading, setRightsLoading] = useState(false);
+  const [resumeFile, setResumeFile] = useState<{
+    url: string;
+    name: string | null;
+    size: number | null;
+  } | null>(null);
+  const [resumeFileState, setResumeFileState] = useState<
+    'idle' | 'loading' | 'ready' | 'none' | 'error'
+  >('idle');
+  const [resumeFileHtml, setResumeFileHtml] = useState<string | null>(null);
+  const [resumeFileText, setResumeFileText] = useState<string | null>(null);
+
+  // 打开详情时拉取原始简历文件签名 URL；Word 转 HTML、文本直接读取，PDF 用 iframe 原生渲染
+  useEffect(() => {
+    if (!open || !candidate) {
+      setResumeFileState('idle');
+      return;
+    }
+    let active = true;
+    setResumeFileState('loading');
+    setResumeFile(null);
+    setResumeFileHtml(null);
+    setResumeFileText(null);
+    void (async () => {
+      try {
+        const response = await authFetch(
+          `/api/candidates/${candidate.id}/resume-file`,
+        );
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || '读取原始简历失败');
+        }
+        if (!active) return;
+        const data = result.data as {
+          url: string;
+          name: string | null;
+          size: number | null;
+        } | null;
+        if (!data) {
+          setResumeFileState('none');
+          return;
+        }
+        setResumeFile(data);
+        const lowerName = (data.name ?? '').toLowerCase();
+        if (lowerName.endsWith('.docx')) {
+          const binaryResponse = await fetch(data.url);
+          const converted = await mammoth.convertToHtml({
+            arrayBuffer: await binaryResponse.arrayBuffer(),
+          });
+          if (active) setResumeFileHtml(converted.value);
+        } else if (lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
+          const textResponse = await fetch(data.url);
+          if (active) setResumeFileText(await textResponse.text());
+        }
+        if (active) setResumeFileState('ready');
+      } catch {
+        if (active) setResumeFileState('error');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [open, candidate]);
 
   async function handleDecisionRight(
     action: 'request_explanation' | 'object_to_automated_decision',
@@ -986,9 +1157,13 @@ export function CandidateDetailDialog({
     }
   }
 
+  const sourceJob = candidate?.source_job_id
+    ? jobs.find((job) => job.id === candidate.source_job_id)
+    : undefined;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>候选人详情</DialogTitle>
         </DialogHeader>
@@ -1007,6 +1182,20 @@ export function CandidateDetailDialog({
                 <h3 className="text-xl font-bold">{candidate.name}</h3>
                 <p className="text-gray-500">{candidate.current_position}</p>
               </div>
+            </div>
+            <div className="rounded-md border border-blue-100 bg-blue-50/50 px-3 py-2 text-xs space-y-1 text-slate-700">
+              <p>
+                绑定职位：{sourceJob?.title ?? '未绑定'}
+                {candidate.source_job_binding_status === 'active' && (
+                  <span className="ml-1 text-blue-600">（有效）</span>
+                )}
+                {candidate.source_job_binding_status === 'expired' && (
+                  <span className="ml-1 text-amber-600">（已过期）</span>
+                )}
+              </p>
+              {candidate.created_by_name && (
+                <p>录入人：{candidate.created_by_name}</p>
+              )}
             </div>
             <Separator />
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -1116,6 +1305,44 @@ export function CandidateDetailDialog({
                   </p>
                 )}
               </div>
+            )}
+            {resumeFileState === 'ready' && resumeFile && (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm text-gray-500">原始简历</p>
+                  {resumeFile.name && (
+                    <span className="truncate text-xs text-gray-400">
+                      {resumeFile.name}
+                    </span>
+                  )}
+                </div>
+                {resumeFileHtml ? (
+                  <iframe
+                    title="原始简历"
+                    sandbox=""
+                    srcDoc={resumeFileHtml}
+                    className="h-96 w-full rounded-lg border bg-white"
+                  />
+                ) : resumeFileText !== null ? (
+                  <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-sm">
+                    {resumeFileText}
+                  </pre>
+                ) : (
+                  <iframe
+                    title="原始简历"
+                    src={resumeFile.url}
+                    className="h-96 w-full rounded-lg border"
+                  />
+                )}
+              </div>
+            )}
+            {resumeFileState === 'loading' && (
+              <p className="text-sm text-gray-400">正在加载原始简历…</p>
+            )}
+            {resumeFileState === 'error' && (
+              <p className="text-sm text-red-500">
+                原始简历加载失败，仅展示下方简历摘要
+              </p>
             )}
             {candidate.resume_text && (
               <div>
@@ -1260,6 +1487,267 @@ export function RevokeCandidateDialog({
             确认撤回
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * 简历快速导入弹窗：HR 拖入招聘平台下载的简历文件后：
+ * 浏览器端解析文本 → 字段提取 → 极简确认（姓名 + 关联职位）→ 一键入库。
+ * 授权证据由服务端默认登记（招聘平台授权记录、保留 1 年、人工复核优先）。
+ */
+export function QuickImportDialog({
+  open,
+  onOpenChange,
+  file,
+  onImported,
+  lockedJobId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  file: File | null;
+  onImported: () => Promise<void>;
+  lockedJobId?: string | null;
+}) {
+  const { jobs } = useWorkspaceData();
+  const [phase, setPhase] = useState<'parsing' | 'confirm' | 'error'>('parsing');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [fullText, setFullText] = useState('');
+  const [name, setName] = useState('');
+  const [jobId, setJobId] = useState('');
+  const [extracted, setExtracted] = useState<Record<string, unknown>>({});
+  const [duplicates, setDuplicates] = useState<DuplicateCandidateHint[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  // 文件变化即开始解析：浏览器端提取文本 → 调提取接口 → 进入极简确认
+  useEffect(() => {
+    if (!file || !open) return;
+    let active = true;
+    setPhase('parsing');
+    setErrorMessage('');
+    setDuplicates([]);
+    setExtracted({});
+    setFullText('');
+    // 预选职位：从职位页发起时锁定该职位，否则取最近操作的职位
+    setJobId(lockedJobId ?? sessionStorage.getItem('last_job_id') ?? '');
+    void (async () => {
+      try {
+        const text = await extractResumeTextFromFile(file);
+        if (text.trim().length < 10) {
+          throw new Error('未能从文件中提取到有效文本（可能是扫描件图片型 PDF）');
+        }
+        const response = await authFetch('/api/candidates/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || '字段提取失败');
+        if (!active) return;
+        const fields = (result.data?.extracted ?? {}) as Record<string, unknown>;
+        setExtracted(fields);
+        setFullText(text);
+        setName(
+          typeof fields.name === 'string' && fields.name ? fields.name : '',
+        );
+        setDuplicates(
+          Array.isArray(result.data?.duplicates)
+            ? (result.data.duplicates as DuplicateCandidateHint[])
+            : [],
+        );
+        setPhase('confirm');
+      } catch (error) {
+        if (active) {
+          setErrorMessage(
+            error instanceof Error ? error.message : '简历解析失败',
+          );
+          setPhase('error');
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [file, open, lockedJobId]);
+
+  function stringField(key: string): string {
+    const value = extracted[key];
+    return typeof value === 'string' ? value : '';
+  }
+
+  function stringArrayField(key: string): string[] {
+    const value = extracted[key];
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
+  }
+
+  async function handleImport() {
+    if (!name.trim()) {
+      toast.error('请确认候选人姓名');
+      return;
+    }
+    if (!jobId) {
+      toast.error('请选择关联职位');
+      return;
+    }
+    setImporting(true);
+    try {
+      const response = await authFetch('/api/candidates/quick-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: stringField('email') || null,
+          phone: stringField('phone') || null,
+          source_job_id: jobId,
+          skills: stringArrayField('skills'),
+          experience_years:
+            typeof extracted.experience_years === 'number'
+              ? (extracted.experience_years as number)
+              : null,
+          education: stringField('education') || null,
+          current_company: stringField('current_company') || null,
+          current_position: stringField('current_position') || null,
+          current_city: stringField('current_city') || null,
+          preferred_locations: stringArrayField('preferred_locations'),
+          salary_expectation: stringField('salary_expectation') || null,
+          resume_text: fullText,
+        }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        toast.error(result.error || '导入失败');
+        return;
+      }
+      // 入库成功后保存原始简历文件，供候选人详情展示（失败不影响入库结果）
+      const candidateId = result.data?.id;
+      if (typeof candidateId === 'string' && file) {
+        try {
+          await uploadCandidateResumeFile(candidateId, file);
+        } catch {
+          toast.warning(
+            '候选人已入库，但原始简历文件保存失败，详情页将仅显示简历摘要',
+          );
+        }
+      }
+      toast.success('候选人已导入并绑定职位');
+      onOpenChange(false);
+      await onImported();
+    } catch {
+      toast.error('导入失败，请重试');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>简历快速导入</DialogTitle>
+          <DialogDescription>
+            解析简历文件，确认姓名与职位后一键入库
+          </DialogDescription>
+        </DialogHeader>
+
+        {phase === 'parsing' && (
+          <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-gray-500">
+            <LoaderCircle className="h-8 w-8 animate-spin text-blue-500" />
+            正在解析简历并提取字段...
+          </div>
+        )}
+
+        {phase === 'error' && (
+          <div className="space-y-4 py-4">
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>解析失败</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                关闭
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {phase === 'confirm' && (
+          <div className="space-y-4 py-4">
+            {duplicates.length > 0 && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>该候选人可能已存在</AlertTitle>
+                <AlertDescription className="space-y-1 text-xs">
+                  {duplicates.map((item) => (
+                    <p key={item.id}>
+                      {item.name}
+                      {item.source_job_title
+                        ? `（曾绑定：${item.source_job_title}${item.source_job_binding_status === 'expired' ? '，已过期' : ''}）`
+                        : ''}
+                    </p>
+                  ))}
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="grid gap-4">
+              <div>
+                <Label htmlFor="quick_import_name">姓名 *</Label>
+                <Input
+                  id="quick_import_name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="提取到的姓名，可修改"
+                />
+              </div>
+              <div>
+                <Label>关联职位 *</Label>
+                <Select
+                  value={jobId}
+                  onValueChange={setJobId}
+                  disabled={Boolean(lockedJobId)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择候选人应聘的职位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {jobs
+                      .filter((job) => job.status === 'active')
+                      .map((job) => (
+                        <SelectItem key={job.id} value={job.id}>
+                          {job.title}
+                          {job.department ? ` · ${job.department}` : ''}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                {lockedJobId && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    已从职位发起导入，候选人将绑定该职位
+                  </p>
+                )}
+              </div>
+            </div>
+            <p className="text-xs leading-5 text-gray-400">
+              入库后将自动登记「招聘平台授权记录」：即刻生效、默认保留 1
+              年、人工复核优先；姓名与联系方式已加密存储，证明材料可在候选人详情中补充。
+            </p>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                取消
+              </Button>
+              <Button
+                onClick={handleImport}
+                disabled={importing}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {importing ? '导入中...' : '一键入库'}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

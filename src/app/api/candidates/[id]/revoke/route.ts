@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantRequestContext } from '@/lib/auth-server';
+import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
 
 interface RevokeTransactionResult {
   match_records: number;
@@ -38,6 +39,18 @@ export async function DELETE(
   try {
     const { id: candidateId } = await params;
     const { supabase } = await getTenantRequestContext(request);
+
+    // 撤回前读取原始简历文件路径，撤回后一并删除（尽力而为，主体删除以 RPC 事务为准）
+    let resumeFilePath: string | null = null;
+    const { data: candidateRow, error: candidateError } = await supabase
+      .from('candidates')
+      .select('resume_file_path')
+      .eq('id', candidateId)
+      .single();
+    if (!candidateError && candidateRow?.resume_file_path) {
+      resumeFilePath = candidateRow.resume_file_path as string;
+    }
+
     const { data, error } = await supabase.rpc(
       'revoke_candidate_authorization',
       {
@@ -60,6 +73,25 @@ export async function DELETE(
     }
     if (error) {
       throw new Error(`撤回授权失败: ${error.message}`);
+    }
+
+    if (resumeFilePath) {
+      try {
+        const serviceSupabase = getSupabaseServiceClient();
+        await serviceSupabase.storage
+          .from('candidate-resumes')
+          .remove([resumeFilePath]);
+        await serviceSupabase
+          .from('candidates')
+          .update({
+            resume_file_path: null,
+            resume_file_name: null,
+            resume_file_size: null,
+          })
+          .eq('id', candidateId);
+      } catch {
+        // 原始简历文件清理尽力而为；候选人主体已按 RPC 事务删除。
+      }
     }
 
     const transactionResult = parseRevokeResult(data);

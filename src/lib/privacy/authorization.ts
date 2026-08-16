@@ -40,7 +40,7 @@ export const authorizationSubmissionSchema = z.object({
   processing_expires_at: dateTimeString,
   external_processors: z.array(
     z.string().trim().min(1).max(200),
-  ).min(1, '请至少列明一个实际外部处理方').max(20),
+  ).min(0, '请至少列明一个实际外部处理方').max(20), // rules_only 模式下无外部处理方，允许空数组（前端表单仍要求列明）
   automated_decision_preference: z.enum(AUTOMATED_DECISION_PREFERENCES, {
     error: '请选择候选人的自动化决策偏好',
   }),

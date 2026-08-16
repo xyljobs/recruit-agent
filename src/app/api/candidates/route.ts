@@ -40,6 +40,7 @@ const candidateCreateBodySchema = z.object({
   resume_text: z.string().max(200_000).nullable().optional(),
   notes: z.string().max(10_000).nullable().optional(),
   data_source: z.string().trim().max(50).optional(),
+  source_job_id: z.string().trim().max(36).nullable().optional(),
 }).strict();
 
 // 数据脱敏函数
@@ -165,10 +166,32 @@ export async function GET(request: NextRequest) {
         }
       }
     }
+    // 录入人姓名：批量查询 users 表，避免逐条查询
+    const createdByIds = processedData
+      .map(candidate => Reflect.get(candidate, 'created_by'))
+      .filter((createdBy): createdBy is string => typeof createdBy === 'string');
+    const nameByUserId = new Map<string, string>();
+    if (createdByIds.length > 0) {
+      const { data: creators, error: creatorsError } = await supabase
+        .from('users')
+        .select('id, name')
+        .in('id', createdByIds);
+      if (creatorsError) {
+        throw new Error(`查询录入人失败: ${creatorsError.message}`);
+      }
+      for (const creator of creators ?? []) {
+        nameByUserId.set(creator.id, creator.name);
+      }
+    }
+
     const candidatesWithAuthorization = processedData.map(candidate => {
       const candidateId = Reflect.get(candidate, 'id');
+      const createdBy = Reflect.get(candidate, 'created_by');
       return {
         ...candidate,
+        created_by_name: typeof createdBy === 'string'
+          ? (nameByUserId.get(createdBy) ?? null)
+          : null,
         authorization: typeof candidateId === 'string'
           ? authorizationByCandidate.get(candidateId) ?? null
           : null,
@@ -296,6 +319,7 @@ export async function POST(request: NextRequest) {
           resume_text: encryptedResumeText,
           notes: body.notes,
           data_source: body.data_source || 'manual',
+          source_job_id: body.source_job_id || null,
           is_authorized: true,
         },
         p_authorization: authorizationEvidence,

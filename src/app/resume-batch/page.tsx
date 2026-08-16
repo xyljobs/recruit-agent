@@ -124,7 +124,6 @@ export default function ResumeBatchPage() {
   const [sheetUrl, setSheetUrl] = useState('');
   const [worksheetId, setWorksheetId] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [folderMode, setFolderMode] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -147,19 +146,15 @@ export default function ResumeBatchPage() {
     styleSample: '',
   });
 
-  useEffect(() => {
-    const input = fileInputRef.current;
-    if (!input) return;
-    if (folderMode) {
-      input.setAttribute('webkitdirectory', '');
-      input.setAttribute('directory', '');
-    } else {
-      input.removeAttribute('webkitdirectory');
-      input.removeAttribute('directory');
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  // 挂载即启用 directory 模式（浏览器 API 属性非标准，需手动设置；ref 回调避免条件渲染导致 useEffect 时序错配）
+  const folderInputRefCallback = useCallback((el: HTMLInputElement | null) => {
+    folderInputRef.current = el;
+    if (el) {
+      el.setAttribute('webkitdirectory', '');
+      el.setAttribute('directory', '');
     }
-    input.value = '';
-    setFiles([]);
-  }, [folderMode]);
+  }, []);
 
   const loadTasks = useCallback(async () => {
     const response = await authFetch('/api/resume-batch/status');
@@ -428,33 +423,52 @@ export default function ResumeBatchPage() {
                   </div>
 
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="resume-files">简历 PDF</Label>
-                          <label className="flex items-center gap-2 text-sm text-slate-600">
-                            <Checkbox
-                              checked={folderMode}
-                              onCheckedChange={checked => setFolderMode(checked === true)}
-                            />
-                            选择整个文件夹
-                          </label>
-                        </div>
-                        <label
-                          htmlFor="resume-files"
+                        <Label>简历 PDF</Label>
+                        <div
                           className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 px-6 py-8 text-center transition hover:bg-blue-50"
+                          onClick={() => fileInputRef.current?.click()}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter') fileInputRef.current?.click();
+                          }}
                         >
                           <FileUp className="mb-3 h-9 w-9 text-blue-500" />
                           <span className="font-medium text-slate-800">
-                            {folderMode ? '选择包含简历的文件夹' : '选择一份或多份 PDF'}
+                            点击选择一份或多份 PDF，或
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="text-blue-600 hover:underline"
+                              onClick={event => {
+                                event.stopPropagation();
+                                folderInputRef.current?.click();
+                              }}
+                              onKeyDown={event => {
+                                if (event.key === 'Enter') {
+                                  event.stopPropagation();
+                                  folderInputRef.current?.click();
+                                }
+                              }}
+                            >
+                              选择整个文件夹
+                            </span>
                           </span>
                           <span className="mt-1 text-xs text-slate-500">
                             单次最多 50 份，每份不超过 30MB
                           </span>
-                        </label>
+                        </div>
                         <input
                           ref={fileInputRef}
-                          id="resume-files"
                           type="file"
                           accept=".pdf,application/pdf"
+                          multiple
+                          className="sr-only"
+                          onChange={event => handleFiles(event.target.files)}
+                        />
+                        <input
+                          ref={folderInputRefCallback}
+                          type="file"
                           multiple
                           className="sr-only"
                           onChange={event => handleFiles(event.target.files)}

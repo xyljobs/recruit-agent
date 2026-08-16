@@ -11,6 +11,7 @@ export const RATE_LIMITS = {
   candidateExtract: { scope: 'candidates:extract' },
   jdParse: { scope: 'jd:parse' },
   jdGenerate: { scope: 'jd:generate' },
+  jdKeywords: { scope: 'jd:keywords' },
   interviewGuide: { scope: 'interview:guide' },
   interviewGuideRead: { scope: 'interview:guide:read' },
   interviewBankRead: { scope: 'interview:bank:read' },

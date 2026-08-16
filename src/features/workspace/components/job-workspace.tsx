@@ -357,7 +357,7 @@ export function JobWorkspace() {
     // 解析结果即时生效；职位列表后台刷新，不阻塞等待反馈
     void reloadJobs();
     if (targetJobId) {
-      toast.success('已按最新描述重新提炼岗位关键词与用人标准');
+      toast.success('已重新提炼搜索关键词、润色发布版JD，并更新用人标准');
     } else {
       toast.success('JD解析成功！请先在第二步完成候选人入库，再在第三步生成短名单');
     }
@@ -895,7 +895,7 @@ export function JobWorkspace() {
                   </Button>
                 </div>
                 <p className="text-xs leading-relaxed text-blue-600">
-                  修改下方描述后，点「AI重新解析并更新」让 AI 按最新内容重新提炼岗位关键词与用人标准；不点击的话，后续匹配仍按旧标准执行。仅保存原文不重算标准请用「保存描述」。
+                  修改下方描述后，点「AI重新提炼并润色JD」让 AI 按最新内容重新提炼岗位搜索关键词、更新用人标准，并重新润色发布版JD；不点击的话，后续匹配仍按旧标准执行。仅保存原文不重算标准请用「保存描述」。
                 </p>
               </div>
             )}
@@ -931,7 +931,7 @@ export function JobWorkspace() {
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4 mr-2" />
-                    {editingJobId ? 'AI重新解析并更新' : 'AI智能解析'}
+                    {editingJobId ? 'AI重新提炼并润色JD' : 'AI提炼关键词·润色JD'}
                   </>
                 )}
               </Button>
@@ -948,8 +948,8 @@ export function JobWorkspace() {
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {editingJobId
-                ? '「AI重新解析并更新」会按上方最新描述重新提炼岗位关键词、技能要求与年限门槛，并更新该职位的用人标准，后续匹配以此为准'
-                : 'AI 将提取职位、薪资、技能等要求生成需求卡片，作为候选人入库与后续匹配的用人标准'}
+                ? '「AI重新提炼并润色JD」会按上方最新描述重新提炼岗位搜索关键词、技能要求与年限门槛，更新用人标准并重新润色发布版JD，后续匹配以此为准'
+                : 'AI 将提炼岗位搜索关键词、生成用人标准需求卡片，并润色一份可直接发布的职位描述'}
             </p>
           </CardContent>
         </Card>

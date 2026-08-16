@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS job_requirements (
   education_required VARCHAR(100),
   skills_required JSONB DEFAULT '[]',
   bonus_skills JSONB DEFAULT '[]',
+  search_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
   responsibilities JSONB DEFAULT '[]',
   benefits JSONB DEFAULT '[]',
   urgency VARCHAR(20) DEFAULT 'normal' CHECK (urgency IN ('urgent', 'normal', 'low')),
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS job_requirements (
   missing_fields JSONB DEFAULT '[]',
   industry_field VARCHAR(100),
   raw_jd TEXT,
+  publish_jd TEXT,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'closed', 'draft')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE
@@ -75,6 +77,9 @@ CREATE TABLE IF NOT EXISTS job_requirements (
 
 CREATE INDEX IF NOT EXISTS job_requirements_status_idx ON job_requirements(status);
 CREATE INDEX IF NOT EXISTS job_requirements_created_at_idx ON job_requirements(created_at);
+ALTER TABLE job_requirements
+ADD COLUMN IF NOT EXISTS search_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+ADD COLUMN IF NOT EXISTS publish_jd TEXT;
 
 -- ============================================
 -- 3. 候选人表
@@ -339,6 +344,7 @@ BEGIN
       WHEN 'candidates:list' THEN 120
       WHEN 'candidates:search' THEN 120
       WHEN 'jd:parse' THEN 10
+      WHEN 'jd:keywords' THEN 10
       WHEN 'boss:keywords' THEN 10
       WHEN 'boss:execute' THEN 10
       WHEN 'match:batch:submit' THEN 10
@@ -365,6 +371,7 @@ BEGIN
       WHEN 'candidates:list' THEN 60
       WHEN 'candidates:search' THEN 60
       WHEN 'jd:parse' THEN 300
+      WHEN 'jd:keywords' THEN 300
       WHEN 'boss:keywords' THEN 300
       WHEN 'boss:execute' THEN 60
       WHEN 'match:batch:submit' THEN 60
@@ -826,6 +833,52 @@ BEGIN
 END
 $$;
 
+-- 候选人原始简历文件（私有）：候选人详情中展示原始 PDF/Word，撤回授权时随主体一并删除。
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS resume_file_path VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS resume_file_name VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS resume_file_size INTEGER;
+
+DO $$
+BEGIN
+  IF to_regclass('storage.buckets') IS NOT NULL THEN
+    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    VALUES (
+      'candidate-resumes',
+      'candidate-resumes',
+      false,
+      31457280,
+      ARRAY[
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain'
+      ]::text[]
+    )
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF to_regclass('storage.objects') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS candidate_resumes_tenant_objects ON storage.objects';
+    EXECUTE $policy$
+      CREATE POLICY candidate_resumes_tenant_objects ON storage.objects
+      FOR ALL TO authenticated
+      USING (
+        bucket_id = 'candidate-resumes'
+        AND split_part(name, '/', 1) = current_organization_id()
+      )
+      WITH CHECK (
+        bucket_id = 'candidate-resumes'
+        AND split_part(name, '/', 1) = current_organization_id()
+      )
+    $policy$;
+  END IF;
+END
+$$;
+
 -- ============================================
 -- 13. 企业租户、邀请注册与行级安全
 -- ============================================
@@ -1078,7 +1131,6 @@ BEGIN
     AND users.auth_version = p_auth_version
     AND auth_sessions.revoked_at IS NULL
     AND auth_sessions.expires_at > NOW()
-    AND users.organization_id = p_organization_id
     AND users.is_active = true
     AND members.is_active = true
     AND organizations.is_active = true;
@@ -1352,6 +1404,16 @@ BEGIN
   INTO candidate_input
   FROM jsonb_populate_record(NULL::candidates, p_candidate);
 
+  IF NULLIF(candidate_input.source_job_id, '') IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM job_requirements
+      WHERE id = candidate_input.source_job_id
+        AND organization_id = v_organization_id
+    ) THEN
+      RAISE EXCEPTION 'source job not found in current organization' USING ERRCODE = 'P0002';
+    END IF;
+  END IF;
+
   INSERT INTO candidates (
     organization_id,
     name,
@@ -1379,7 +1441,11 @@ BEGIN
     resume_text,
     notes,
     data_source,
-    is_authorized
+    is_authorized,
+    created_by,
+    source_job_id,
+    source_job_bound_at,
+    source_job_binding_status
   ) VALUES (
     v_organization_id,
     candidate_input.name,
@@ -1407,7 +1473,11 @@ BEGIN
     candidate_input.resume_text,
     candidate_input.notes,
     COALESCE(candidate_input.data_source, 'manual'),
-    true
+    true,
+    v_user_id,
+    NULLIF(candidate_input.source_job_id, ''),
+    CASE WHEN NULLIF(candidate_input.source_job_id, '') IS NOT NULL THEN NOW() ELSE NULL END,
+    CASE WHEN NULLIF(candidate_input.source_job_id, '') IS NOT NULL THEN 'active' ELSE NULL END
   )
   RETURNING * INTO created_candidate;
 
@@ -1491,6 +1561,73 @@ BEGIN
     || jsonb_build_object('authorization_record_id', created_authorization.id);
 END
 $$;
+
+CREATE OR REPLACE FUNCTION update_candidate_source_job(
+  p_candidate_id VARCHAR,
+  p_source_job_id VARCHAR
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_organization_id VARCHAR(36) := current_organization_id();
+  v_user_id VARCHAR(36) := current_app_user_id();
+  v_role VARCHAR(20) := current_app_role();
+  updated_candidate candidates%ROWTYPE;
+BEGIN
+  IF v_organization_id IS NULL OR v_user_id IS NULL OR v_role NOT IN ('hr', 'admin') THEN
+    RAISE EXCEPTION 'authenticated recruiter context required' USING ERRCODE = '28000';
+  END IF;
+
+  IF NULLIF(trim(p_source_job_id), '') IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM job_requirements
+      WHERE id = p_source_job_id
+        AND organization_id = v_organization_id
+    ) THEN
+      RAISE EXCEPTION 'source job not found in current organization' USING ERRCODE = 'P0002';
+    END IF;
+  END IF;
+
+  UPDATE candidates
+  SET source_job_id = NULLIF(trim(p_source_job_id), ''),
+      source_job_bound_at = CASE
+        WHEN NULLIF(trim(p_source_job_id), '') IS NOT NULL THEN NOW()
+        ELSE NULL
+      END,
+      source_job_binding_status = CASE
+        WHEN NULLIF(trim(p_source_job_id), '') IS NOT NULL THEN 'active'
+        ELSE NULL
+      END,
+      source_job_binding_expired_at = NULL,
+      updated_at = NOW()
+  WHERE id = p_candidate_id
+    AND organization_id = v_organization_id
+  RETURNING * INTO updated_candidate;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  INSERT INTO audit_logs (
+    organization_id, user_id, action, target_type, target_id, details
+  ) VALUES (
+    v_organization_id, v_user_id, 'rebind_candidate_job', 'candidate',
+    updated_candidate.id,
+    jsonb_build_object(
+      'source_job_id', updated_candidate.source_job_id,
+      'binding_status', updated_candidate.source_job_binding_status
+    )
+  );
+
+  RETURN to_jsonb(updated_candidate);
+END
+$$;
+
+REVOKE ALL ON FUNCTION update_candidate_source_job(VARCHAR, VARCHAR) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION update_candidate_source_job(VARCHAR, VARCHAR) TO authenticated;
 
 CREATE OR REPLACE FUNCTION revoke_candidate_authorization(
   p_candidate_id VARCHAR,
@@ -1811,10 +1948,26 @@ CREATE POLICY organizations_tenant_select ON organizations
   USING (id = current_organization_id());
 
 DROP POLICY IF EXISTS users_self_access ON users;
+-- 多组织模型：租户身份以 organization_members 有效成员关系为准
+--（与会话校验 RPC validate_auth_session、登录流程同一口径）。
+-- users.organization_id 仅表示主组织，不能用作租户访问控制条件，
+-- 否则登录非主组织时租户客户端查不到自身用户行，/api/auth/me 返回 401，
+-- 并与 /login 已登录守卫形成重定向死循环（页面永久"加载中"）。
+-- 权限面与下方列级 GRANT SELECT 对齐：仅 SELECT，最小权限。
 CREATE POLICY users_self_access ON users
-  FOR ALL TO authenticated
-  USING (id = current_app_user_id() AND organization_id = current_organization_id())
-  WITH CHECK (id = current_app_user_id() AND organization_id = current_organization_id());
+  FOR SELECT TO authenticated
+  USING (
+    id = current_app_user_id()
+    AND EXISTS (
+      SELECT 1
+      FROM organization_members om
+      JOIN organizations o ON o.id = om.organization_id
+      WHERE om.user_id = users.id
+        AND om.organization_id = current_organization_id()
+        AND om.is_active = true
+        AND o.is_active = true
+    )
+  );
 
 DROP POLICY IF EXISTS organization_members_tenant_select ON organization_members;
 CREATE POLICY organization_members_tenant_select ON organization_members
@@ -2294,6 +2447,48 @@ ALTER TABLE candidates
   ALTER COLUMN analytics_subject_id SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS candidates_organization_analytics_subject_unique
   ON candidates(organization_id, analytics_subject_id);
+
+-- 候选人入库归属：录入 HR 与首次关联职位（职位-候选人绑定有时效性，
+-- 职位关闭或该职位招聘定论后自动置为 expired；NULL 表示未绑定职位的资源库直录）
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS created_by VARCHAR(36),
+  ADD COLUMN IF NOT EXISTS source_job_id VARCHAR(36),
+  ADD COLUMN IF NOT EXISTS source_job_bound_at TIMESTAMP WITH TIME ZONE,
+  ADD COLUMN IF NOT EXISTS source_job_binding_status VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS source_job_binding_expired_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE candidates
+  DROP CONSTRAINT IF EXISTS candidates_source_job_binding_status_check,
+  ADD CONSTRAINT candidates_source_job_binding_status_check
+    CHECK (source_job_binding_status IN ('active', 'expired'));
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'candidates_created_by_fkey'
+      AND conrelid = 'candidates'::regclass
+  ) THEN
+    ALTER TABLE candidates
+      ADD CONSTRAINT candidates_created_by_fkey
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'candidates_source_job_fkey'
+      AND conrelid = 'candidates'::regclass
+  ) THEN
+    ALTER TABLE candidates
+      ADD CONSTRAINT candidates_source_job_fkey
+      FOREIGN KEY (source_job_id) REFERENCES job_requirements(id) ON DELETE SET NULL;
+  END IF;
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS candidates_source_job_idx
+  ON candidates(organization_id, source_job_id);
+CREATE INDEX IF NOT EXISTS candidates_created_by_idx
+  ON candidates(organization_id, created_by);
 
 ALTER TABLE match_runs
   ADD COLUMN IF NOT EXISTS ai_mode VARCHAR(30);
@@ -4934,6 +5129,14 @@ CREATE POLICY candidates_current_authorization_select ON candidates
     )
   );
 
+-- 候选人条件删除（API 层守门：仅无匹配/短名单/复盘留痕的候选人允许硬删，
+-- 已留痕的引导走撤回授权 RPC；此处仅做租户隔离，删除权限本身已随上面的
+-- 多表 GRANT SELECT, INSERT, UPDATE, DELETE 授予 authenticated）
+DROP POLICY IF EXISTS candidates_tenant_delete ON candidates;
+CREATE POLICY candidates_tenant_delete ON candidates
+  FOR DELETE TO authenticated
+  USING (organization_id = current_organization_id());
+
 DROP POLICY IF EXISTS tenant_isolation ON match_records;
 DROP POLICY IF EXISTS match_records_current_authorization_select ON match_records;
 CREATE POLICY match_records_current_authorization_select ON match_records
@@ -5181,6 +5384,62 @@ DROP TRIGGER IF EXISTS match_records_tenant_references ON match_records;
 CREATE TRIGGER match_records_tenant_references
 BEFORE INSERT OR UPDATE OF organization_id, job_id, candidate_id ON match_records
 FOR EACH ROW EXECUTE FUNCTION enforce_match_record_tenant_references();
+
+-- 职位-候选人绑定时效性：职位关闭时，绑定在该职位上的候选人自动置为 expired
+CREATE OR REPLACE FUNCTION expire_candidate_job_binding_on_job_close()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NEW.status = 'closed' AND OLD.status IS DISTINCT FROM NEW.status THEN
+    UPDATE candidates
+    SET source_job_binding_status = 'expired',
+        source_job_binding_expired_at = NOW(),
+        updated_at = NOW()
+    WHERE source_job_id = NEW.id
+      AND source_job_binding_status = 'active';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS job_requirements_close_expire_bindings ON job_requirements;
+CREATE TRIGGER job_requirements_close_expire_bindings
+AFTER UPDATE OF status ON job_requirements
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION expire_candidate_job_binding_on_job_close();
+
+-- 职位-候选人绑定时效性：该职位招聘定论（已录用/已拒绝/已撤回）时绑定自动置为 expired
+CREATE OR REPLACE FUNCTION expire_candidate_job_binding_on_match_decision()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NEW.status IN ('hired', 'rejected', 'withdrawn')
+    AND OLD.status IS DISTINCT FROM NEW.status THEN
+    UPDATE candidates
+    SET source_job_binding_status = 'expired',
+        source_job_binding_expired_at = NOW(),
+        updated_at = NOW()
+    WHERE id = NEW.candidate_id
+      AND source_job_id = NEW.job_id
+      AND source_job_binding_status = 'active';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS match_records_decision_expire_bindings ON match_records;
+CREATE TRIGGER match_records_decision_expire_bindings
+AFTER UPDATE OF status ON match_records
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION expire_candidate_job_binding_on_match_decision();
 
 CREATE OR REPLACE FUNCTION prevent_authorization_reactivation()
 RETURNS TRIGGER
@@ -5699,6 +5958,7 @@ BEGIN
       WHEN 'candidates:search' THEN 120
       WHEN 'jd:parse' THEN 10
       WHEN 'jd:generate' THEN 10
+      WHEN 'jd:keywords' THEN 10
       WHEN 'boss:keywords' THEN 10
       WHEN 'boss:execute' THEN 10
       WHEN 'match:batch:submit' THEN 10
@@ -5730,6 +5990,7 @@ BEGIN
       WHEN 'candidates:search' THEN 60
       WHEN 'jd:parse' THEN 300
       WHEN 'jd:generate' THEN 300
+      WHEN 'jd:keywords' THEN 300
       WHEN 'boss:keywords' THEN 300
       WHEN 'boss:execute' THEN 60
       WHEN 'match:batch:submit' THEN 60

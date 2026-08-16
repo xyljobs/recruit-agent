@@ -209,6 +209,12 @@ export const candidates = pgTable(
     data_source: varchar("data_source", { length: 50 }).default("manual"), // 数据来源: manual/api/import
     is_authorized: boolean("is_authorized").default(false), // 仅在证据链核验通过后置为 true
     analytics_subject_id: varchar("analytics_subject_id", { length: 36 }).notNull().default(sql`gen_random_uuid()`),
+    // 入库归属：录入 HR 与首次关联职位（职位-候选人绑定有时效性，过期后自动置为 expired）
+    created_by: varchar("created_by", { length: 36 }),
+    source_job_id: varchar("source_job_id", { length: 36 }),
+    source_job_bound_at: timestamp("source_job_bound_at", { withTimezone: true }),
+    source_job_binding_status: varchar("source_job_binding_status", { length: 20 }), // NULL=未绑定 / active / expired
+    source_job_binding_expired_at: timestamp("source_job_binding_expired_at", { withTimezone: true }),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }),
   },
@@ -219,6 +225,8 @@ export const candidates = pgTable(
     index("candidates_current_city_idx").on(table.current_city),
     index("candidates_email_hmac_idx").on(table.email_hmac),
     index("candidates_phone_hmac_idx").on(table.phone_hmac),
+    index("candidates_source_job_idx").on(table.organization_id, table.source_job_id),
+    index("candidates_created_by_idx").on(table.organization_id, table.created_by),
     uniqueIndex("candidates_organization_analytics_subject_unique").on(table.organization_id, table.analytics_subject_id),
   ]
 );
@@ -1175,6 +1183,7 @@ export const insertCandidateSchema = createCoercedInsertSchema(candidates).pick(
   notes: true,
   data_source: true,
   is_authorized: true,
+  source_job_id: true,
 });
 
 export const insertMatchRecordSchema = createCoercedInsertSchema(matchRecords).pick({

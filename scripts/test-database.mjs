@@ -1120,6 +1120,102 @@ async function assertInvitationFlow(pool) {
   process.stdout.write('database checkpoint: invitation RLS gates verified\n');
 }
 
+async function assertMultiOrgSelfAccess(pool) {
+  // 回归背景：users_self_access 曾以 users.organization_id（主组织）做租户条件，
+  // 导致登录非主组织时 /api/auth/me 的租户查询 0 行 → 401 → 与 /login 守卫死循环。
+  // 该策略必须与 validate_auth_session / 登录流程同口径：以 organization_members 有效成员关系为准。
+  const ids = {
+    primaryOrg: 'a1a1a1a1-1111-4111-8111-111111111111',
+    secondOrg: 'a1a1a1a1-2222-4222-8222-222222222222',
+    member: 'a1a1a1a1-3333-4333-8333-333333333333',
+    outsider: 'a1a1a1a1-4444-4444-8444-444444444444',
+    session: 'a1a1a1a1-5555-4555-8555-555555555555',
+  };
+  await pool.query(
+    `INSERT INTO organizations (id, name, slug, is_active, metrics_enabled_at)
+     VALUES ($1, 'Multi Primary', 'multi-primary', true, NOW()),
+            ($2, 'Multi Second', 'multi-second', true, NOW())`,
+    [ids.primaryOrg, ids.secondOrg],
+  );
+  await pool.query(
+    `INSERT INTO users (id, organization_id, email, password_hash, name, role)
+     VALUES ($1, $2, 'multi@example.test', 'hash', 'Multi', 'admin'),
+            ($3, $2, 'outsider@example.test', 'hash', 'Outsider', 'hr')`,
+    [ids.member, ids.primaryOrg, ids.outsider],
+  );
+  await pool.query(
+    `INSERT INTO organization_members (organization_id, user_id, role, is_active)
+     VALUES ($1, $2, 'admin', true),
+            ($1, $3, 'hr', true),
+            ($4, $2, 'admin', true)`,
+    [ids.primaryOrg, ids.member, ids.outsider, ids.secondOrg],
+  );
+  await pool.query(
+    `INSERT INTO auth_sessions (id, user_id, organization_id, auth_version, expires_at)
+     VALUES ($1, $2, $3, 1, NOW() + INTERVAL '1 hour')`,
+    [ids.session, ids.member, ids.secondOrg],
+  );
+
+  const claimsSecondOrg = { organizationId: ids.secondOrg, userId: ids.member, appRole: 'admin' };
+
+  // 非主组织会话必须能读取自身用户行（/api/auth/me 的租户查询路径）
+  const self = await withClaims(pool, claimsSecondOrg, client => client.query(
+    `SELECT id, email FROM users WHERE id = $1`,
+    [ids.member],
+  ));
+  if (self.rowCount !== 1) {
+    throw new Error('non-primary-org tenant session could not read its own users row (users_self_access regression)');
+  }
+
+  // 权限面仅列级 SELECT：租户角色写自身用户行必须被拒绝（服务端写入走 service_role）
+  await expectDatabaseError(
+    () => withClaims(pool, claimsSecondOrg, client => client.query(
+      `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+      [ids.member],
+    )),
+    '42501',
+  );
+
+  // 不得泄露其他用户行（全表仅见自身一行；显式查他人 0 行）
+  const visible = await withClaims(pool, claimsSecondOrg, client => client.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM users`,
+  ));
+  if (visible.rows[0].count !== 1) {
+    throw new Error('users_self_access leaked rows beyond the current user');
+  }
+  const outsiderRead = await withClaims(pool, claimsSecondOrg, client => client.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM users WHERE id = $1`,
+    [ids.outsider],
+  ));
+  if (outsiderRead.rows[0].count !== 0) {
+    throw new Error('users_self_access exposed another user row');
+  }
+
+  // validate_auth_session 对非主组织会话必须返回成员角色（/api/auth/me 的会话校验路径）
+  const rpc = await pool.query(
+    `SELECT validate_auth_session($1, $2, $3, 1) AS state`,
+    [ids.session, ids.member, ids.secondOrg],
+  );
+  if (!rpc.rows[0].state || rpc.rows[0].state.role !== 'admin') {
+    throw new Error('validate_auth_session did not validate a non-primary-org session');
+  }
+
+  // 成员关系停用后自访问立即失效
+  await pool.query(
+    `UPDATE organization_members SET is_active = false
+     WHERE organization_id = $1 AND user_id = $2`,
+    [ids.secondOrg, ids.member],
+  );
+  const afterRevoke = await withClaims(pool, claimsSecondOrg, client => client.query(
+    `SELECT COUNT(*)::INTEGER AS count FROM users WHERE id = $1`,
+    [ids.member],
+  ));
+  if (afterRevoke.rows[0].count !== 0) {
+    throw new Error('users_self_access still granted after membership deactivation');
+  }
+  process.stdout.write('database checkpoint: multi-org users self access verified\n');
+}
+
 async function main() {
   dockerCompose('up', '-d', '--wait');
   const pool = new Pool({ connectionString });
@@ -1131,6 +1227,7 @@ async function main() {
     await assertBaseline(pool);
     await assertDecisionCopilotBehavior(pool);
     await assertInvitationFlow(pool);
+    await assertMultiOrgSelfAccess(pool);
     process.stdout.write('database migration, RLS, state, idempotency, integration and cleanup checks passed\n');
   } finally {
     await pool.end();

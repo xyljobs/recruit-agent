@@ -166,6 +166,7 @@ const demoJobs = [
     education_required: '本科及以上学历，计算机相关专业',
     skills_required: ['React', 'TypeScript', '架构设计', '性能优化', '微前端'],
     bonus_skills: ['Node.js', 'WebGL', '低代码平台'],
+    search_keywords: ['前端架构师', '前端工程师', '前端开发', 'React', 'TypeScript', '微前端', 'Node.js', 'WebGL', '低代码平台'],
     responsibilities: [
       '负责公司前端架构设计和优化',
       '制定前端技术规范和最佳实践',
@@ -187,7 +188,9 @@ const demoJobs = [
 1. 本科及以上学历，计算机相关专业
 2. 5年以上前端开发经验
 3. 精通React、TypeScript，有架构设计经验
-4. 良好的沟通能力和团队协作精神
+4. 熟悉微前端架构与性能优化，有Node.js开发经验
+5. 有WebGL或低代码平台实践经验者优先
+6. 良好的沟通能力和团队协作精神
 
 【岗位职责】
 1. 负责公司前端架构设计和优化
@@ -213,6 +216,7 @@ const demoJobs = [
     education_required: '本科及以上学历，机械、自动化相关专业',
     skills_required: ['PLC编程', '工业机器人', '数字化工厂'],
     bonus_skills: ['Python', '机器视觉', '边缘计算'],
+    search_keywords: ['智能制造工程师', '自动化工程师', 'PLC编程', '工业机器人', '数字化工厂', '机器视觉', '边缘计算'],
     responsibilities: [
       '负责智能产线规划与实施',
       '工业机器人系统集成',
@@ -257,6 +261,7 @@ const demoJobs = [
     education_required: '大专及以上学历，电气自动化、机电一体化专业优先',
     skills_required: ['PLC编程', '电气调试', '伺服驱动', 'PROFINET'],
     bonus_skills: ['EPLAN', '工业机器人', '触摸屏'],
+    search_keywords: ['PLC电控工程师', 'PLC工程师', '电气调试工程师', 'PLC编程', 'PROFINET', '伺服驱动', 'EPLAN'],
     responsibilities: [
       '负责新产线电气调试与验收',
       '现有产线 PLC 程序维护与优化',
@@ -301,6 +306,7 @@ const demoJobs = [
     education_required: '本科及以上学历',
     skills_required: ['Java', 'Spring Boot', 'MySQL', 'Redis'],
     bonus_skills: ['Kafka', '微服务', 'Docker'],
+    search_keywords: ['Java后端开发', '后端工程师', 'Java开发工程师', 'Java', 'Spring Boot', 'MySQL', 'Redis', 'Kafka'],
     responsibilities: [
       '负责核心业务系统开发',
       '参与系统架构设计',
@@ -525,32 +531,38 @@ async function seedDemoData() {
   }
   console.log(`共插入 ${candidatesInserted} 位候选人`);
 
-  // 2. 插入职位数据（历史职位缺少职位描述时回填 raw_jd）
+  // 2. 插入职位数据（历史职位缺少职位描述/岗位关键词时非破坏性回填）
   console.log('\n2. 插入职位数据...');
   let jobsInserted = 0;
   let jobsBackfilled = 0;
   for (const job of demoJobs) {
     const { data: existingJob } = await supabase
       .from('job_requirements')
-      .select('id, raw_jd')
+      .select('id, raw_jd, search_keywords')
       .eq('organization_id', organizationId)
       .eq('title', job.title)
       .maybeSingle();
 
     if (existingJob) {
-      if (!existingJob.raw_jd) {
+      const updates: Record<string, unknown> = {};
+      if (!existingJob.raw_jd) updates.raw_jd = job.raw_jd;
+      const existingKeywords = existingJob.search_keywords;
+      if (!Array.isArray(existingKeywords) || existingKeywords.length === 0) {
+        updates.search_keywords = job.search_keywords;
+      }
+      if (Object.keys(updates).length > 0) {
         const { error: updateError } = await supabase
           .from('job_requirements')
-          .update({ raw_jd: job.raw_jd, updated_at: new Date().toISOString() })
+          .update({ ...updates, updated_at: new Date().toISOString() })
           .eq('id', existingJob.id);
         if (updateError) {
-          console.log(`  ❌ ${job.title}: 回填职位描述失败: ${updateError.message}`);
+          console.log(`  ❌ ${job.title}: 回填失败: ${updateError.message}`);
         } else {
           jobsBackfilled++;
-          console.log(`  🔄 ${job.title} 已存在，回填职位描述`);
+          console.log(`  🔄 ${job.title} 已存在，回填缺失字段`);
         }
       } else {
-        console.log(`  ⏩ ${job.title} 已存在且已有职位描述，跳过`);
+        console.log(`  ⏩ ${job.title} 已存在且数据完整，跳过`);
       }
       continue;
     }
@@ -572,7 +584,7 @@ async function seedDemoData() {
       console.log(`  ❌ ${job.title}: ${error.message}`);
     }
   }
-  console.log(`共插入 ${jobsInserted} 个职位，回填 ${jobsBackfilled} 个历史职位的职位描述`);
+  console.log(`共插入 ${jobsInserted} 个职位，回填 ${jobsBackfilled} 个历史职位的缺失字段`);
 
   // 3. 统计结果
   console.log('\n========================================');

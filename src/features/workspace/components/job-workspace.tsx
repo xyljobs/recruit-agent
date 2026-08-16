@@ -4,14 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
-  Award,
-  ChevronDown,
+  ArrowRight,
   ClipboardList,
   Copy,
   FileText,
+  FileUp,
   History,
   Pencil,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Sparkles,
@@ -43,28 +44,20 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth-client';
 import { formatExperienceBand } from '@/lib/matching/screening-rubric';
-import { getScoreBg, getScoreColor, getScoreLabel } from '../constants';
+import { refineSearchKeywords, withTitleFirst } from '@/lib/matching/search-keywords';
+import { getScoreBg, getScoreColor } from '../constants';
 import { useWorkspaceData } from '../hooks/use-workspace-data';
 import { JobFormDialog } from './job-form-dialog';
+import { ImportPreviewDialog } from './resume-import-preview';
 import type { Job } from '../types';
 
-const BATCH_POLL_INTERVAL_MS = 2_000;
-const BATCH_POLL_MAX_ATTEMPTS = 60;
-
-interface BatchMatchItem {
-  candidate_id: string;
-  overall_score: number;
-  rank?: number;
-  recommendation_band?: 'strong' | 'consider' | 'insufficient_information';
-}
-
-interface BatchMatchResult {
-  matches?: BatchMatchItem[];
-  top_candidates?: BatchMatchItem[];
-}
+// 职位选中记忆 key：配合 URL jobId 参数，切换页面/刷新后回到职位页仍保持选中
+const LAST_JOB_ID_KEY = 'last_job_id';
 
 interface TalentPoolCandidate {
   candidate_id: string;
@@ -89,74 +82,27 @@ interface JobPostingRecord {
 
 const POSTING_PLATFORMS = ['Boss直聘', '智联', '58', '猎聘', 'LinkedIn', '内推', '其他'];
 
-const BAND_LABELS: Record<NonNullable<BatchMatchItem['recommendation_band']>, string> = {
-  strong: '优先推荐',
-  consider: '可考虑',
-  insufficient_information: '信息不足',
-};
-
-/** 将原始解析技能提炼为招聘平台可用的简洁搜索关键词：拆分复合词、去除描述性修饰、去重过滤 */
-function refineKeywords(rawKeywords: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const refined: string[] = [];
-  for (const raw of rawKeywords) {
-    for (const part of String(raw).split(/[、，,;；/]+/)) {
-      const text = part
-        .trim()
-        .replace(/^(熟悉|精通|掌握|了解|熟练|具备|具有|有)/, '')
-        .replace(/^\d+\s*年以上/, '')
-        .replace(/(经验|能力|背景|者优先|优先|相关|基础)$/, '')
-        .trim();
-      if (text.length < 2 || text.length > 12) continue;
-      const key = text.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refined.push(text);
-    }
-  }
-  return refined;
-}
-
-async function waitForBatchMatch(taskId: string): Promise<BatchMatchResult> {
-  for (let attempt = 0; attempt < BATCH_POLL_MAX_ATTEMPTS; attempt += 1) {
-    await new Promise<void>(resolve => {
-      window.setTimeout(resolve, BATCH_POLL_INTERVAL_MS);
-    });
-
-    const response = await authFetch(
-      `/api/match/batch?taskId=${encodeURIComponent(taskId)}`,
-    );
-    const result = await response.json();
-    if (!response.ok || !result.success) {
-      throw new Error(result.error || '查询批量匹配任务失败');
-    }
-    if (result.data?.status === 'done' && result.data.result) {
-      return result.data.result;
-    }
-    if (result.data?.status === 'error') {
-      throw new Error(result.data.errorMessage || '批量匹配任务失败');
-    }
-  }
-
-  throw new Error('批量匹配处理超时，请稍后在匹配记录中查看结果');
-}
-
 export function JobWorkspace() {
   const router = useRouter();
   const {
     jobs,
-    candidates,
-    reloadDashboard,
     reloadJobs,
-    reloadMatchRecords,
+    reloadCandidates,
   } = useWorkspaceData();
   const [jdContent, setJdContent] = useState('');
   const [parsedJob, setParsedJob] = useState<Job | null>(null);
   const parsedBand = parsedJob?.screening_rubric?.experience_band ?? null;
   const parsedBandLabel = formatExperienceBand(parsedBand);
   const [jdLoading, setJdLoading] = useState(false);
+  const [jdElapsed, setJdElapsed] = useState(0);
+  // 流式解析的实时预览文本：AI 生成过程中逐字展示，消除等待"卡住"感
+  const [parsePreview, setParsePreview] = useState('');
+  const parsePreviewRef = useRef<HTMLPreElement | null>(null);
   const [jobSearch, setJobSearch] = useState('');
-  const [generatingJobId, setGeneratingJobId] = useState<string | null>(null);
+  const [importCandidateOpen, setImportCandidateOpen] = useState(false);
+  const [importCandidateJobId, setImportCandidateJobId] = useState<string | null>(null);
+  const [importCandidateFiles, setImportCandidateFiles] = useState<File[]>([]);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [savingJd, setSavingJd] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -164,15 +110,13 @@ export function JobWorkspace() {
   const [deletingJob, setDeletingJob] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
-  const [autoMatchSummary, setAutoMatchSummary] = useState<{
-    jobId: string;
-    jobTitle: string;
-    matches: BatchMatchItem[];
-  } | null>(null);
-  const [matching, setMatching] = useState(false);
-  const [showParseDetails, setShowParseDetails] = useState(false);
   const [publishDescription, setPublishDescription] = useState('');
   const [generatingDescription, setGeneratingDescription] = useState(false);
+  // 岗位关键词重新生成：loading/计时/深度思考开关；序号保证只有最新一次生成能更新关键词
+  const [keywordsLoading, setKeywordsLoading] = useState(false);
+  const [keywordsElapsed, setKeywordsElapsed] = useState(0);
+  const [deepThinking, setDeepThinking] = useState(false);
+  const keywordsGenSeq = useRef(0);
   const [talentPool, setTalentPool] = useState<TalentPoolData | null>(null);
   const [talentPoolLoading, setTalentPoolLoading] = useState(false);
   const [talentPoolExpanded, setTalentPoolExpanded] = useState(false);
@@ -184,23 +128,69 @@ export function JobWorkspace() {
   const [postingUrl, setPostingUrl] = useState('');
   const [postingNote, setPostingNote] = useState('');
   const [submittingPosting, setSubmittingPosting] = useState(false);
-  const jdCardRef = useRef<HTMLDivElement | null>(null);
+  // 发布版描述生成序号与 abort 控制器：保证只有最新一次生成能更新首屏
+  const publishGenSeq = useRef(0);
+  const publishGenAbort = useRef<AbortController | null>(null);
+  // 本会话已生成描述的本地缓存：reloadJobs 完成前切换职位也能复用，避免重复生成
+  const publishCacheRef = useRef<Record<string, string>>({});
+  // 解析结果 tab 区：切换 tab 后若新面板底部超出视口（tab 栏贴近屏幕底部时），
+  // 自动把 tab 栏平滑滚到视口顶部，免去手动滚动；内容全部可见时不打扰
+  const resultTabsRef = useRef<HTMLDivElement | null>(null);
+  const handleResultTabChange = () => {
+    window.requestAnimationFrame(() => {
+      const root = resultTabsRef.current;
+      if (!root) return;
+      const panel = root.querySelector<HTMLElement>('[data-state="active"][role="tabpanel"]');
+      const panelBottom = panel?.getBoundingClientRect().bottom ?? 0;
+      if (panelBottom > window.innerHeight - 16) {
+        root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  };
 
   const editingJob = useMemo(
     () => jobs.find((job) => job.id === editingJobId) ?? null,
     [jobs, editingJobId],
   );
 
+  // 解析耗时可视化：LLM 生成完整需求卡片通常需 10 秒左右，计时让等待可感知
+  useEffect(() => {
+    if (!jdLoading) return;
+    setJdElapsed(0);
+    const timer = window.setInterval(() => setJdElapsed((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [jdLoading]);
+
+  // 流式预览自动滚动到底部，跟随最新生成内容
+  useEffect(() => {
+    const node = parsePreviewRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [parsePreview]);
+
+  // 关键词重新生成耗时可视化：快速模式约 10 秒，深度思考模式需 1-3 分钟
+  useEffect(() => {
+    if (!keywordsLoading) return;
+    setKeywordsElapsed(0);
+    const timer = window.setInterval(() => setKeywordsElapsed((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [keywordsLoading]);
+
   // 解析的核心交付物：岗位关键词，供 HR 复制到招聘平台搜索
-  // 优先用 AI 提炼的 search_keywords（含职位别名/同义词）；不足时回退到本地清洗必需+加分技能
+  // 优先用 AI 提炼并持久化的 search_keywords（含职位别名/同义词）；不足时回退到本地清洗必需+加分技能
+  // 职位名称是最精准的搜索词，始终置于首位
   const parsedKeywords = useMemo(() => {
     if (!parsedJob) return [] as string[];
-    const fromAi = refineKeywords(parsedJob.search_keywords ?? []);
-    if (fromAi.length >= 3) return fromAi.slice(0, 10);
-    return refineKeywords([
-      ...(parsedJob.skills_required ?? []),
-      ...(parsedJob.bonus_skills ?? []),
-    ]).slice(0, 10);
+    const fromAi = refineSearchKeywords(parsedJob.search_keywords ?? []);
+    if (fromAi.length >= 3) {
+      return withTitleFirst(fromAi, parsedJob.title).slice(0, 10);
+    }
+    return withTitleFirst(
+      refineSearchKeywords([
+        ...(parsedJob.skills_required ?? []),
+        ...(parsedJob.bonus_skills ?? []),
+      ]),
+      parsedJob.title,
+    ).slice(0, 10);
   }, [parsedJob]);
 
   // 人才池再激活：解析结果就绪后拉取历史高分候选人
@@ -292,6 +282,7 @@ export function JobWorkspace() {
     }
     const targetJobId = editingJobId;
     setJdLoading(true);
+    setParsePreview('');
     try {
       const response = await authFetch('/api/jd/parse', {
         method: 'POST',
@@ -301,102 +292,74 @@ export function JobWorkspace() {
           ...(targetJobId ? { jobId: targetJobId } : {}),
         }),
       });
-      const result = await response.json();
-      if (!result.success) {
-        toast.error(result.error || '解析失败');
+      const contentType = response.headers.get('content-type') ?? '';
+
+      // JSON 响应：限流 / AI 未启用等前置错误
+      if (contentType.includes('application/json')) {
+        const result: { success?: boolean; data?: Job; error?: string } = await response.json();
+        if (!result.success || !result.data) throw new Error(result.error || '解析失败');
+        finishParse(result.data, targetJobId);
         return;
       }
 
-      const job: Job = result.data;
-      setParsedJob(job);
-      setPublishDescription('');
-      await reloadJobs();
-      if (targetJobId) {
-        toast.success('职位描述已更新并完成AI重新解析');
-      } else {
-        toast.success('JD解析成功！可点击「匹配候选人」开始自动匹配');
+      // NDJSON 流式响应：逐分片实时渲染生成过程，done 事件携带最终结果
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('解析失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+      const outcome: { job?: Job; error?: string } = {};
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: { type?: string; text?: string; data?: Job; error?: string } = JSON.parse(line);
+        if (event.type === 'delta' && event.text) {
+          accumulated += event.text;
+          setParsePreview(accumulated);
+        } else if (event.type === 'done' && event.data) {
+          outcome.job = event.data;
+        } else if (event.type === 'error') {
+          outcome.error = event.error || '解析失败';
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
       }
+      handleLine(buffer);
+      if (outcome.error) throw new Error(outcome.error);
+      if (!outcome.job) throw new Error('解析失败，请重试');
+      finishParse(outcome.job, targetJobId);
     } catch (error) {
       console.error('JD解析失败:', error);
-      toast.error('解析失败，请重试');
+      toast.error(error instanceof Error ? error.message : '解析失败，请重试');
     } finally {
       setJdLoading(false);
+      setParsePreview('');
     }
   }
 
-  /** 自动搜索候选人库并执行批量匹配（与解析动作解耦，由「匹配候选人」按钮触发） */
-  async function runAutoMatch(job: Job) {
-    if (!job.id || !job.skills_required?.length) return;
-
-    try {
-      const searchResponse = await authFetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          skills: job.skills_required,
-          location: job.location,
-          limit: 10,
-        }),
-      });
-      const searchResult = await searchResponse.json();
-      if (!searchResult.success || !searchResult.data?.candidates?.length) {
-        toast.info('未找到匹配的候选人，请先添加候选人', {
-          action: {
-            label: '去添加',
-            onClick: () => router.push('/candidates'),
-          },
-        });
-        return;
-      }
-
-      toast.info(
-        `找到 ${searchResult.data.candidates.length} 位候选人，正在批量匹配...`,
-      );
-      const candidateIds = searchResult.data.candidates.map(
-        (candidate: { id: string }) => candidate.id,
-      );
-      const matchResponse = await authFetch('/api/match/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          job_id: job.id,
-          candidate_ids: candidateIds,
-          client_event_id: crypto.randomUUID(),
-        }),
-      });
-      const matchResult = await matchResponse.json();
-      if (!matchResponse.ok || !matchResult.success) {
-        throw new Error(matchResult.error || '批量匹配任务提交失败');
-      }
-
-      const taskId = matchResult.data?.taskId;
-      const batchResult = typeof taskId === 'string'
-        ? await waitForBatchMatch(taskId)
-        : matchResult.data;
-      const topMatches = (
-        batchResult?.matches ||
-        batchResult?.top_candidates ||
-        []
-      ).slice(0, 5);
-      setAutoMatchSummary({ jobId: job.id, jobTitle: job.title, matches: topMatches });
-      toast.success(`匹配完成！Top ${topMatches.length} 候选人已生成`);
-      await Promise.all([reloadMatchRecords(), reloadDashboard()]);
-    } catch (error) {
-      console.error('自动匹配失败:', error);
-      toast.error('自动匹配失败，请手动匹配');
+  /** 解析完成后应用结果：更新需求卡片、后台刷新职位列表并提示 */
+  function finishParse(job: Job, targetJobId: string | null) {
+    setParsedJob(job);
+    // 解析结果同步为当前选中职位：写入 URL 与 sessionStorage，切换页面后返回仍保持
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('jobId') !== job.id) {
+      params.set('jobId', job.id);
+      router.replace(`/jobs?${params.toString()}`, { scroll: false });
     }
-  }
-
-  /** 人工触发：基于当前解析出的用人标准，自动搜索候选人库并批量匹配 */
-  async function handleMatchCandidates() {
-    if (!parsedJob || matching) return;
-    setMatching(true);
-    toast.info('正在搜索匹配候选人...');
-    try {
-      await runAutoMatch(parsedJob);
-    } finally {
-      setMatching(false);
+    sessionStorage.setItem(LAST_JOB_ID_KEY, job.id);
+    // 发布版JD为默认首屏：解析完成后自动静默生成一次，消除空首屏
+    void generatePublishDescription(job.id, { silent: true });
+    // 解析结果即时生效；职位列表后台刷新，不阻塞等待反馈
+    void reloadJobs();
+    if (targetJobId) {
+      toast.success('已按最新描述重新提炼岗位关键词与用人标准');
+    } else {
+      toast.success('JD解析成功！请先在第二步完成候选人入库，再在第三步生成短名单');
     }
   }
 
@@ -414,26 +377,149 @@ export function JobWorkspace() {
     }
   }
 
-  /** 反哺：基于解析出的用人标准生成发布版职位描述，供 HR 复制到招聘平台发布 */
-  async function generatePublishDescription() {
-    if (!parsedJob?.id || generatingDescription) return;
+  /** 重新生成岗位关键词：基于职位最新描述独立提炼，不重跑整份 JD 解析；深度思考模式结果更精准但约需 1-3 分钟 */
+  async function regenerateKeywords() {
+    const job = parsedJob;
+    if (!job) return;
+    const seq = ++keywordsGenSeq.current;
+    const jobId = job.id;
+    setKeywordsLoading(true);
+    try {
+      const response = await authFetch('/api/jd/keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, deepThinking }),
+      });
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.ok) {
+        const result: { error?: string } | null = await response.json().catch(() => null);
+        throw new Error(result?.error || '重新生成失败');
+      }
+      // JSON 响应：rules_only 模式本地规则精炼即时返回
+      if (contentType.includes('application/json')) {
+        const result: { success?: boolean; data?: { search_keywords?: string[] }; error?: string } = await response.json();
+        if (!result.success || !result.data) throw new Error(result.error || '重新生成失败');
+        if (seq !== keywordsGenSeq.current) return;
+        applyKeywords(result.data.search_keywords ?? [], jobId);
+        return;
+      }
+      // NDJSON 流式响应：delta 为生成过程，done 事件携带归一化后的最终关键词
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('重新生成失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const outcome: { keywords?: string[]; error?: string } = {};
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: { type?: string; data?: { search_keywords?: string[] }; error?: string } = JSON.parse(line);
+        if (event.type === 'done' && event.data) {
+          outcome.keywords = event.data.search_keywords ?? [];
+        } else if (event.type === 'error') {
+          outcome.error = event.error || '重新生成失败';
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+      if (seq !== keywordsGenSeq.current) return;
+      if (outcome.error) throw new Error(outcome.error);
+      applyKeywords(outcome.keywords ?? [], jobId);
+    } catch (error) {
+      // 被作废的任务静默退出，不报错不更新状态
+      if (seq !== keywordsGenSeq.current) return;
+      console.error('重新生成岗位关键词失败:', error);
+      toast.error(error instanceof Error ? error.message : '重新生成失败，请重试');
+    } finally {
+      if (seq === keywordsGenSeq.current) setKeywordsLoading(false);
+    }
+  }
+
+  /** 应用新关键词：更新当前选中职位（校验职位未切换），后台刷新职位列表同步持久化结果 */
+  function applyKeywords(keywords: string[], jobId: string) {
+    setParsedJob((prev) => (prev && prev.id === jobId ? { ...prev, search_keywords: keywords } : prev));
+    void reloadJobs();
+    toast.success('岗位关键词已重新生成，可复制后到招聘平台搜索人才');
+  }
+
+  /** 反哺：基于解析出的用人标准生成发布版职位描述，供 HR 复制到招聘平台发布；silent 用于解析/选中职位后的自动触发，只展示结果不打断 */
+  async function generatePublishDescription(jobId: string, options?: { silent?: boolean }) {
+    const silent = options?.silent === true;
+    // 序号自增并 abort 上一次请求：切换职位或重复触发时旧任务作废，避免旧结果覆盖新首屏
+    const seq = ++publishGenSeq.current;
+    publishGenAbort.current?.abort();
+    const controller = new AbortController();
+    publishGenAbort.current = controller;
     setGeneratingDescription(true);
+    setPublishDescription('');
     try {
       const response = await authFetch('/api/jd/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: parsedJob.id }),
+        body: JSON.stringify({ jobId }),
+        signal: controller.signal,
       });
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || '生成失败');
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.ok) {
+        const result: { error?: string } | null = await response.json().catch(() => null);
+        throw new Error(result?.error || '生成失败');
       }
-      setPublishDescription(String(result.data?.description ?? ''));
-      toast.success('发布版职位描述已生成，可复制后到招聘平台发布');
+      if (contentType.includes('application/json')) {
+        // rules_only 模式：本地模板即时返回完整结果
+        const result: { success?: boolean; data?: { description?: string }; error?: string } = await response.json();
+        if (!result.success) throw new Error(result.error || '生成失败');
+        if (seq !== publishGenSeq.current) return;
+        const description = String(result.data?.description ?? '');
+        setPublishDescription(description);
+        publishCacheRef.current[jobId] = description;
+        // 后台刷新列表同步 publish_jd，切走职位后回来仍能读到库中缓存
+        void reloadJobs();
+        if (!silent) toast.success('发布版职位描述已生成，可复制后到招聘平台发布');
+        return;
+      }
+      // AI 模式：NDJSON 流式输出，逐分片实时渲染
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('生成失败');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event: { type?: string; text?: string } = JSON.parse(line);
+        if (event.type === 'delta' && event.text) {
+          accumulated += event.text;
+          if (seq === publishGenSeq.current) setPublishDescription(accumulated);
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+      if (seq !== publishGenSeq.current) return;
+      if (!accumulated.trim()) throw new Error('生成内容为空，请重试');
+      publishCacheRef.current[jobId] = accumulated.trim();
+      // 后台刷新列表同步 publish_jd，切走职位后回来仍能读到库中缓存
+      void reloadJobs();
+      if (!silent) toast.success('发布版职位描述已生成，可复制后到招聘平台发布');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '生成失败，请重试');
+      // 被作废的任务（切换职位/abort）静默退出，不报错不更新状态
+      if (seq !== publishGenSeq.current) return;
+      if (!silent) toast.error(error instanceof Error ? error.message : '生成失败，请重试');
     } finally {
-      setGeneratingDescription(false);
+      if (seq === publishGenSeq.current) {
+        setGeneratingDescription(false);
+        publishGenAbort.current = null;
+      }
     }
   }
 
@@ -498,7 +584,7 @@ export function JobWorkspace() {
       setPostingPlatform('');
       setPostingUrl('');
       setPostingNote('');
-      toast.success('发布已登记');
+      toast.success('发布渠道已登记');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '登记发布失败');
     } finally {
@@ -523,7 +609,11 @@ export function JobWorkspace() {
       const response = await authFetch(`/api/jobs/${deletingJob.id}`, { method: 'DELETE' });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || '删除失败');
-      if (editingJobId === deletingJob.id) setEditingJobId(null);
+      if (editingJobId === deletingJob.id) {
+        setEditingJobId(null);
+        // 清理职位选中记忆，避免删除后回到本页又尝试恢复已删职位（URL 残留参数由恢复逻辑清理）
+        sessionStorage.removeItem(LAST_JOB_ID_KEY);
+      }
       setDeletingJob(null);
       await reloadJobs();
       toast.success('职位已删除');
@@ -534,15 +624,57 @@ export function JobWorkspace() {
     }
   }
 
-  function handleSelectJob(job: Job) {
+  /** 应用选中职位：回填 JD 原文、展示解析结果。内部系统默认宽屏分栏，原地切换无需滚动 */
+  function applySelectJob(job: Job) {
     setEditingJobId(job.id);
     setJdContent(job.raw_jd ?? '');
     setParsedJob(job);
-    setPublishDescription('');
-    requestAnimationFrame(() => {
-      jdCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    if (job.id !== parsedJob?.id) {
+      // 切换职位：作废进行中的旧职位生成请求，避免其结果覆盖新首屏
+      publishGenSeq.current += 1;
+      publishGenAbort.current?.abort();
+      publishGenAbort.current = null;
+      setGeneratingDescription(false);
+    }
+    // 缓存优先：库中已持久化或本会话刚生成过的描述直接复用，
+    // 切页/刷新/重选职位时内容保持稳定，只有显式点击“生成发布版描述”才重算
+    const cachedPublish = job.publish_jd || publishCacheRef.current[job.id];
+    if (cachedPublish) {
+      setPublishDescription(cachedPublish);
+      return;
+    }
+    // 无缓存时：同职位已有内存结果/生成中则复用，否则自动静默生成一次，消除空首屏
+    const sameJobReady = job.id === parsedJob?.id && (publishDescription !== '' || generatingDescription);
+    if (!sameJobReady) void generatePublishDescription(job.id, { silent: true });
   }
+
+  /** 选中职位：应用选中状态，并把 jobId 写入 URL 与 sessionStorage，切换页面/刷新后返回仍保持选中 */
+  function handleSelectJob(job: Job) {
+    applySelectJob(job);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('jobId') !== job.id) {
+      params.set('jobId', job.id);
+      router.replace(`/jobs?${params.toString()}`, { scroll: false });
+    }
+    sessionStorage.setItem(LAST_JOB_ID_KEY, job.id);
+  }
+
+  /** 职位库加载完成后，从 URL（优先）或 sessionStorage 恢复上次选中的职位 */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get('jobId') || sessionStorage.getItem(LAST_JOB_ID_KEY);
+    if (!jobId) return;
+    const job = jobs.find((item) => item.id === jobId);
+    if (job) {
+      if (job.id !== parsedJob?.id) applySelectJob(job);
+    } else if (jobs.length > 0) {
+      // URL/存储指向的职位已不存在（如已删除），清理失效状态
+      if (params.has('jobId')) router.replace('/jobs', { scroll: false });
+      sessionStorage.removeItem(LAST_JOB_ID_KEY);
+    }
+    // 仅在职位库加载完成时恢复选中；applySelectJob 为本组件函数，无需纳入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
 
   async function saveJdUpdate() {
     if (!editingJobId) return;
@@ -585,30 +717,148 @@ export function JobWorkspace() {
     }
   }
 
-  async function generateShortlist(jobId: string) {
-    setGeneratingJobId(jobId);
-    try {
-      const response = await authFetch('/api/shortlists', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_id: jobId, top_n: 10, client_event_id: crypto.randomUUID() }),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.error || '短名单任务提交失败');
-      toast.success('短名单任务已提交');
-      router.push('/shortlists');
-    } catch (error) {
-      await reloadJobs();
-      toast.error(error instanceof Error ? error.message : '短名单任务提交失败');
-    } finally {
-      setGeneratingJobId(null);
-    }
-  }
-
   return (
-    <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div ref={jdCardRef} className="scroll-mt-6">
+    <div className="grid gap-6 lg:grid-cols-[clamp(320px,20vw,460px)_minmax(0,1fr)] lg:items-start">
+      {/* 左栏：职位库常驻列表，点击即时切换右侧编辑，无需上下滚动 */}
+      <Card className="self-start lg:sticky lg:top-6">
+        <CardHeader className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <CardTitle>职位库</CardTitle>
+              <CardDescription>共 {jobs.length} 个职位 · 点击即时在右侧编辑</CardDescription>
+            </div>
+            <Button size="sm" className="shrink-0" onClick={openCreateForm}>
+              <Plus className="h-4 w-4" />
+              新增
+            </Button>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="搜索职位..."
+              className="pl-9"
+              value={jobSearch}
+              onChange={(event) => setJobSearch(event.target.value)}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {filteredJobs.length > 0 ? (
+            <div className="space-y-2 lg:max-h-[calc(100vh-17rem)] lg:overflow-y-auto">
+              {filteredJobs.map((job) => {
+                const selected = job.id === editingJobId;
+                return (
+                  <div
+                    key={job.id}
+                    className={`rounded-lg border p-3 cursor-pointer transition-colors ${
+                      selected
+                        ? 'border-blue-300 bg-blue-50/70'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                    onClick={() => handleSelectJob(job)}
+                    title="点击在右侧回填并编辑职位描述"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 truncate text-sm font-semibold text-gray-900">{job.title}</p>
+                      {job.salary_range && (
+                        <span className="shrink-0 text-xs font-medium text-emerald-700">{job.salary_range}</span>
+                      )}
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <Badge variant="outline" className="shrink-0 px-1.5 text-[11px]">
+                        {job.status === 'active' ? '已启用' : job.status === 'closed' ? '已关闭' : '草稿'}
+                      </Badge>
+                      <span className="truncate text-xs text-gray-500">
+                        {[job.department, job.location].filter(Boolean).join(' · ') || '—'}
+                      </span>
+                    </div>
+                    {job.skills_required && job.skills_required.length > 0 && (
+                      <p
+                        className="mt-1 truncate text-xs text-gray-400"
+                        title={job.skills_required.join(' · ')}
+                      >
+                        {job.skills_required.join(' · ')}
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                      {job.status === 'active' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 px-1.5 text-xs text-slate-600"
+                          title="为该职位导入候选人简历"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setImportCandidateJobId(job.id);
+                            importFileInputRef.current?.click();
+                          }}
+                        >
+                          <FileUp className="h-3.5 w-3.5" />
+                          导入简历
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-1.5 text-xs text-slate-600"
+                        title={job.status === 'active' ? '关闭该职位' : '重新启用该职位'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void updateJobLifecycle(job.id, job.status === 'active' ? 'close' : 'activate');
+                        }}
+                      >
+                        <Power className="h-3.5 w-3.5" />
+                        {job.status === 'active' ? '关闭' : '启用'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-1.5 text-xs text-slate-600"
+                        title="编辑职位信息"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditForm(job);
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        编辑
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-1.5 text-xs text-red-600 hover:text-red-700"
+                        title="删除职位"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeletingJob(job);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        删除
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              {jobSearch ? (
+                '未找到匹配的职位'
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  暂无职位，可点击「新增」或解析JD
+                </span>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 右栏：职位描述编辑 + 解析结果，选中左侧职位后即时更新 */}
+      <div className="min-w-0 space-y-6">
+        <div>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -616,7 +866,7 @@ export function JobWorkspace() {
               AI 辅助解析职位描述（可选）
             </CardTitle>
             <CardDescription>
-              粘贴职位描述，AI 自动提取职位、薪资、技能等要求并生成需求卡片；确认解析结果后点击「匹配候选人」自动搜索并批量匹配。不使用 AI 时，可在下方「新增职位」手动录入
+              粘贴职位描述，AI 自动提取职位、薪资、技能等要求并生成需求卡片；确认解析结果后，请先在第二步完成候选人入库，再在第三步生成候选人短名单。也可在左侧职位库点击「新增」手动录入
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -630,18 +880,23 @@ export function JobWorkspace() {
               </Alert>
             )}
             {editingJob && (
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                <p className="text-sm text-blue-700">
-                  正在编辑职位：<span className="font-semibold">{editingJob.title}</span>
+              <div className="space-y-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-blue-700">
+                    正在编辑职位：<span className="font-semibold">{editingJob.title}</span>
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 text-blue-700"
+                    onClick={() => setEditingJobId(null)}
+                  >
+                    取消
+                  </Button>
+                </div>
+                <p className="text-xs leading-relaxed text-blue-600">
+                  修改下方描述后，点「AI重新解析并更新」让 AI 按最新内容重新提炼岗位关键词与用人标准；不点击的话，后续匹配仍按旧标准执行。仅保存原文不重算标准请用「保存描述」。
                 </p>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 shrink-0 text-blue-700"
-                  onClick={() => setEditingJobId(null)}
-                >
-                  取消
-                </Button>
               </div>
             )}
             <Textarea
@@ -671,7 +926,7 @@ export function JobWorkspace() {
                 {jdLoading ? (
                   <>
                     <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    AI正在解析...
+                    AI正在解析，内容实时显示中（已{jdElapsed}秒）...
                   </>
                 ) : (
                   <>
@@ -691,6 +946,11 @@ export function JobWorkspace() {
                 </Button>
               )}
             </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {editingJobId
+                ? '「AI重新解析并更新」会按上方最新描述重新提炼岗位关键词、技能要求与年限门槛，并更新该职位的用人标准，后续匹配以此为准'
+                : 'AI 将提取职位、薪资、技能等要求生成需求卡片，作为候选人入库与后续匹配的用人标准'}
+            </p>
           </CardContent>
         </Card>
         </div>
@@ -699,477 +959,548 @@ export function JobWorkspace() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>解析结果</CardTitle>
-              <CardDescription>AI 提取的职位信息将显示在这里，作为匹配候选人的用人标准</CardDescription>
+              <CardDescription>AI 提取的职位信息将显示在这里，作为候选人入库与短名单匹配的用人标准</CardDescription>
             </div>
             <Button
               size="sm"
-              className="shrink-0"
-              disabled={!parsedJob || matching}
-              onClick={() => void handleMatchCandidates()}
+              className="shrink-0 gap-1.5 rounded-full bg-gradient-to-r from-blue-600 to-blue-700 px-4 font-medium text-white shadow-sm transition-all hover:from-blue-700 hover:to-blue-800 hover:shadow-md disabled:opacity-50 disabled:shadow-none"
+              disabled={!parsedJob}
+              onClick={() => router.push('/candidates')}
+              title={parsedJob ? undefined : '先解析或选择一个职位后可继续'}
             >
-              {matching ? (
-                <>
-                  <RefreshCw className="mr-1 h-4 w-4 animate-spin" />
-                  匹配中...
-                </>
-              ) : (
-                <>
-                  <Target className="mr-1 h-4 w-4" />
-                  匹配候选人
-                </>
-              )}
+              <FileUp className="h-4 w-4" />
+              下一步：候选人入库
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
           </CardHeader>
           <CardContent>
+            {jdLoading && (
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                  <p className="text-sm font-medium text-blue-900">
+                    AI 正在生成需求卡片（已{jdElapsed}秒），内容实时显示中…
+                  </p>
+                </div>
+                <pre
+                  ref={parsePreviewRef}
+                  className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded-lg bg-white/80 p-3 font-mono text-xs leading-relaxed text-slate-600"
+                >
+                  {parsePreview || '正在连接模型，内容马上逐字显示…'}
+                </pre>
+              </div>
+            )}
             {parsedJob ? (
               <div className="space-y-4">
-                <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
-                  <h3 className="text-lg font-bold text-blue-900">
-                    {parsedJob.title}
-                  </h3>
-                  {parsedJob.department && (
-                    <p className="text-sm text-blue-700 mt-1">
-                      {parsedJob.department}
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-blue-900">
-                      岗位关键词 · 可复制后到招聘平台搜索人才
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      onClick={() => void copyKeywords()}
-                    >
-                      <Copy className="mr-1 h-4 w-4" />
-                      复制关键词
-                    </Button>
-                  </div>
-                  {parsedKeywords.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {parsedKeywords.map((keyword) => (
-                        <Badge
-                          key={keyword}
-                          variant="secondary"
-                          className="border-blue-200 bg-white text-blue-700"
-                        >
-                          {keyword}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-blue-700">
-                      未解析到技能关键词，可完善职位描述后重新解析
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-purple-200 bg-purple-50/60 p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-purple-900">
-                      发布版职位描述 · 生成后复制到招聘平台发布
-                    </p>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {publishDescription && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void copyPublishDescription()}
-                        >
-                          <Copy className="mr-1 h-4 w-4" />
-                          复制描述
-                        </Button>
+                <div ref={resultTabsRef} className="scroll-mt-28">
+                  <Tabs
+                    key={parsedJob.id}
+                    defaultValue="publish"
+                    onValueChange={handleResultTabChange}
+                  >
+                    <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="publish">发布版JD</TabsTrigger>
+                    <TabsTrigger value="keywords">
+                      岗位关键词
+                      {parsedKeywords.length > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {parsedKeywords.length}
+                        </span>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!parsedJob}
-                        onClick={() => setPostingFormOpen(value => !value)}
-                      >
-                        <ClipboardList className="mr-1 h-4 w-4" />
-                        {postingFormOpen ? '收起登记' : '登记发布'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!parsedJob || generatingDescription}
-                        onClick={() => void generatePublishDescription()}
-                      >
-                        {generatingDescription ? (
-                          <>
-                            <RefreshCw className="mr-1 h-4 w-4 animate-spin" />
-                            生成中...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="mr-1 h-4 w-4" />
-                            生成发布版描述
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                  {publishDescription ? (
-                    <Textarea
-                      readOnly
-                      value={publishDescription}
-                      className="mt-2 min-h-[220px] resize-y bg-white text-sm leading-6"
-                    />
-                  ) : (
-                    <p className="mt-2 text-xs text-purple-700">
-                      基于解析出的用人标准，一键生成结构完整、措辞有吸引力的职位描述；AI 未启用时使用内置模板
-                    </p>
-                  )}
-                  {postingFormOpen && (
-                    <div className="mt-3 rounded-lg border border-purple-200 bg-white p-3">
-                      <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
-                        <div className="space-y-2">
-                          <Label htmlFor="posting-platform">发布平台</Label>
-                          <Select value={postingPlatform} onValueChange={setPostingPlatform}>
-                            <SelectTrigger id="posting-platform" className="w-full">
-                              <SelectValue placeholder="选择平台" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {POSTING_PLATFORMS.map(platform => (
-                                <SelectItem key={platform} value={platform}>{platform}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="posting-url">链接（可选）</Label>
-                          <Input
-                            id="posting-url"
-                            value={postingUrl}
-                            onChange={event => setPostingUrl(event.target.value)}
-                            placeholder="https://"
-                            maxLength={1000}
-                          />
+                    </TabsTrigger>
+                    <TabsTrigger value="talent">
+                      人才池再激活
+                      {talentPool && talentPool.candidates.length > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {talentPool.candidates.length}
+                        </span>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="criteria">匹配依据</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="publish">
+                    <div className="rounded-xl border border-purple-200 bg-purple-50/60 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-purple-900">
+                          发布版职位描述 · 生成后复制到招聘平台发布
+                        </p>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {publishDescription && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void copyPublishDescription()}
+                            >
+                              <Copy className="mr-1 h-4 w-4" />
+                              复制描述
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!parsedJob}
+                            onClick={() => setPostingFormOpen(value => !value)}
+                          >
+                            <ClipboardList className="mr-1 h-4 w-4" />
+                            {postingFormOpen ? '收起登记' : '登记发布渠道'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!parsedJob || generatingDescription}
+                            onClick={() => void generatePublishDescription(parsedJob.id)}
+                          >
+                            {generatingDescription ? (
+                              <>
+                                <RefreshCw className="mr-1 h-4 w-4 animate-spin" />
+                                生成中...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="mr-1 h-4 w-4" />
+                                生成发布版描述
+                              </>
+                            )}
+                          </Button>
                         </div>
                       </div>
-                      <div className="mt-3 space-y-2">
-                        <Label htmlFor="posting-note">备注（可选）</Label>
-                        <Input
-                          id="posting-note"
-                          value={postingNote}
-                          onChange={event => setPostingNote(event.target.value)}
-                          placeholder="例如：发布时使用的标题、渠道联系人等"
-                          maxLength={500}
+                      {publishDescription ? (
+                        <Textarea
+                          readOnly
+                          value={publishDescription}
+                          className="mt-2 min-h-[220px] resize-y bg-white text-sm leading-6"
                         />
-                      </div>
-                      <div className="mt-3 flex items-center justify-end gap-2">
-                        <Button size="sm" variant="ghost" onClick={() => setPostingFormOpen(false)}>
-                          取消
-                        </Button>
-                        <Button size="sm" disabled={submittingPosting} onClick={() => void submitPosting()}>
-                          {submittingPosting ? '登记中…' : '确认登记'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {jobPostings.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs font-medium text-slate-500">已登记发布：</p>
-                    {jobPostings.map(posting => (
-                      <div
-                        key={posting.id}
-                        className="flex items-center gap-1.5 rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs text-purple-800"
-                      >
-                        <span className="font-medium">{posting.platform}</span>
-                        <span className="text-purple-400">·</span>
-                        <span>{new Date(posting.posted_at).toLocaleDateString('zh-CN')}</span>
-                        {posting.note && (
-                          <span
-                            className="max-w-[120px] truncate text-purple-500"
-                            title={posting.note}
-                          >
-                            · {posting.note}
-                          </span>
-                        )}
-                        {posting.url && (
-                          <a
-                            href={posting.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 underline"
-                            title={posting.url}
-                          >
-                            链接
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                    {postingsLoading && <span className="text-xs text-purple-500">刷新中…</span>}
-                  </div>
-                )}
-
-                {talentPool && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-900">
-                        <History className="h-4 w-4 shrink-0 text-emerald-700" />
-                        人才池再激活 · {talentPool.candidates.length} 位历史高分候选人命中当前关键词
-                      </p>
-                      {talentPool.candidates.length > 0 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="shrink-0"
-                          onClick={() => setTalentPoolExpanded(value => !value)}
-                        >
-                          {talentPoolExpanded ? '收起' : '展开列表'}
-                        </Button>
+                      ) : generatingDescription ? (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-purple-700">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          AI 正在撰写职位描述，内容将逐段显示…
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-purple-700">
+                          基于解析出的用人标准，一键生成结构完整、措辞有吸引力的职位描述；AI 未启用时使用内置模板
+                        </p>
                       )}
-                    </div>
-                    {talentPoolLoading && <p className="mt-2 text-xs text-emerald-700">加载中…</p>}
-                    {!talentPoolLoading && talentPool.candidates.length === 0 && (
-                      <p className="mt-2 text-xs text-emerald-700">暂无命中当前技能要求的历史高分候选人</p>
-                    )}
-                    {talentPoolExpanded && (
-                      <div className="mt-3 divide-y divide-emerald-100">
-                        {talentPool.candidates.map(candidate => (
-                          <div key={candidate.candidate_id} className="flex flex-col gap-2 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-sm font-medium text-slate-900">{candidate.name}</span>
-                                <Badge className={`${getScoreBg(candidate.best_score)} ${getScoreColor(candidate.best_score)}`}>
-                                  {candidate.best_score}分
-                                </Badge>
-                              </div>
-                              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                                <span>命中技能：</span>
-                                {candidate.matched_skills.map(skill => (
-                                  <Badge key={skill} variant="secondary" className="text-xs">{skill}</Badge>
-                                ))}
-                                {candidate.last_matched_at && (
-                                  <span className="ml-1">最近匹配：{new Date(candidate.last_matched_at).toLocaleDateString('zh-CN')}</span>
-                                )}
-                              </div>
+                      {postingFormOpen && (
+                        <div className="mt-3 rounded-lg border border-purple-200 bg-white p-3">
+                          <p className="mb-3 text-xs text-purple-700">
+                            登记仅记录发布渠道与链接，系统不会自动发布到所选平台；请先自行在平台发布，再回来完成登记。
+                          </p>
+                          <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
+                            <div className="space-y-2">
+                              <Label htmlFor="posting-platform">发布平台</Label>
+                              <Select value={postingPlatform} onValueChange={setPostingPlatform}>
+                                <SelectTrigger id="posting-platform" className="w-full">
+                                  <SelectValue placeholder="选择平台" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {POSTING_PLATFORMS.map(platform => (
+                                    <SelectItem key={platform} value={platform}>{platform}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <Button
-                                size="sm"
-                                disabled={creatingOutreachId === candidate.candidate_id}
-                                onClick={() => void createOutreachTask(candidate)}
-                              >
-                                {creatingOutreachId === candidate.candidate_id ? '创建中…' : '创建触达待办'}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => router.push(`/matching?jobId=${parsedJob.id}&candidateId=${candidate.candidate_id}`)}
-                              >
-                                深度匹配
-                              </Button>
+                            <div className="space-y-2">
+                              <Label htmlFor="posting-url">链接（可选）</Label>
+                              <Input
+                                id="posting-url"
+                                value={postingUrl}
+                                onChange={event => setPostingUrl(event.target.value)}
+                                placeholder="https://"
+                                maxLength={1000}
+                              />
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="-ml-2 text-gray-500"
-                  onClick={() => setShowParseDetails((value) => !value)}
-                >
-                  <ChevronDown
-                    className={`mr-1 h-4 w-4 transition-transform ${
-                      showParseDetails ? 'rotate-180' : ''
-                    }`}
-                  />
-                  {showParseDetails ? '收起解析明细' : '展开解析明细（匹配依据）'}
-                </Button>
-                {showParseDetails && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      {parsedJob.location && (
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-1">工作地点</p>
-                          <p className="font-medium">{parsedJob.location}</p>
-                        </div>
-                      )}
-                      {parsedJob.salary_range && (
-                        <div className="p-3 bg-emerald-50 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-1">薪资范围</p>
-                          <p className="font-medium text-emerald-600">
-                            {parsedJob.salary_range}
-                          </p>
-                        </div>
-                      )}
-                      {parsedJob.experience_required && (
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-1">经验要求</p>
-                          <p className="font-medium">
-                            {parsedJob.experience_required}
-                          </p>
-                          {parsedBand && (
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                              <Badge variant="outline" className="bg-white">
-                                {parsedBandLabel}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={
-                                  parsedBand.source === 'explicit'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                                }
-                              >
-                                {parsedBand.source === 'explicit' ? 'JD 明确' : 'AI 推断'}
-                              </Badge>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-6 px-1.5 text-xs text-blue-600"
-                                onClick={() => openEditForm(parsedJob)}
-                              >
-                                <Pencil className="mr-1 h-3 w-3" />
-                                编辑年限区间
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {parsedJob.education_required && (
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-1">学历要求</p>
-                          <p className="font-medium">
-                            {parsedJob.education_required}
-                          </p>
+                          <div className="mt-3 space-y-2">
+                            <Label htmlFor="posting-note">备注（可选）</Label>
+                            <Input
+                              id="posting-note"
+                              value={postingNote}
+                              onChange={event => setPostingNote(event.target.value)}
+                              placeholder="例如：发布时使用的标题、渠道联系人等"
+                              maxLength={500}
+                            />
+                          </div>
+                          <div className="mt-3 flex items-center justify-end gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => setPostingFormOpen(false)}>
+                              取消
+                            </Button>
+                            <Button size="sm" disabled={submittingPosting} onClick={() => void submitPosting()}>
+                              {submittingPosting ? '登记中…' : '确认登记'}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
 
-                    {parsedJob.responsibilities &&
-                      parsedJob.responsibilities.length > 0 && (
-                        <div>
-                          <p className="text-sm text-gray-500 mb-2">岗位职责</p>
-                          <ul className="list-disc list-inside space-y-1 text-sm">
-                            {parsedJob.responsibilities.map((responsibility) => (
-                              <li key={responsibility} className="text-gray-700">
-                                {responsibility}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                    {jobPostings.length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-medium text-slate-500">已登记发布渠道：</p>
+                        {jobPostings.map(posting => (
+                          <div
+                            key={posting.id}
+                            className="flex items-center gap-1.5 rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs text-purple-800"
+                          >
+                            <span className="font-medium">{posting.platform}</span>
+                            <span className="text-purple-400">·</span>
+                            <span>{new Date(posting.posted_at).toLocaleDateString('zh-CN')}</span>
+                            {posting.note && (
+                              <span
+                                className="max-w-[120px] truncate text-purple-500"
+                                title={posting.note}
+                              >
+                                · {posting.note}
+                              </span>
+                            )}
+                            {posting.url && (
+                              <a
+                                href={posting.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 underline"
+                                title={posting.url}
+                              >
+                                链接
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                        {postingsLoading && <span className="text-xs text-purple-500">刷新中…</span>}
+                      </div>
+                    )}
+                  </TabsContent>
 
-                    {parsedJob.benefits && parsedJob.benefits.length > 0 && (
-                      <div>
-                        <p className="text-sm text-gray-500 mb-2">福利待遇</p>
-                        <div className="flex flex-wrap gap-2">
-                          {parsedJob.benefits.map((benefit) => (
-                            <Badge
-                              key={benefit}
-                              variant="outline"
-                              className="bg-emerald-50 text-emerald-700 border-emerald-200"
+                  <TabsContent value="keywords">
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-blue-900">
+                          岗位关键词 · 可复制后到招聘平台搜索人才
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <Switch
+                              id="keywords-deep-thinking"
+                              checked={deepThinking}
+                              onCheckedChange={setDeepThinking}
+                              disabled={aiEnabled === false || keywordsLoading}
+                            />
+                            <Label
+                              htmlFor="keywords-deep-thinking"
+                              className="text-xs font-normal text-blue-700"
                             >
-                              {benefit}
+                              深度思考
+                            </Label>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0"
+                            disabled={!parsedJob || keywordsLoading}
+                            onClick={() => void regenerateKeywords()}
+                          >
+                            <RefreshCw className={`mr-1 h-4 w-4 ${keywordsLoading ? 'animate-spin' : ''}`} />
+                            {keywordsLoading ? '生成中…' : '重新生成'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0"
+                            disabled={keywordsLoading}
+                            onClick={() => void copyKeywords()}
+                          >
+                            <Copy className="mr-1 h-4 w-4" />
+                            复制关键词
+                          </Button>
+                        </div>
+                      </div>
+                      {keywordsLoading && (
+                        <p className="mt-2 text-xs text-blue-700">
+                          {deepThinking
+                            ? `深度思考中：AI 正在推理 JD 语义，约需 1-3 分钟（已${keywordsElapsed}秒）…`
+                            : `AI 重新提炼中（已${keywordsElapsed}秒）…`}
+                        </p>
+                      )}
+                      {parsedKeywords.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {parsedKeywords.map((keyword) => (
+                            <Badge
+                              key={keyword}
+                              variant="secondary"
+                              className="border-blue-200 bg-white text-blue-700"
+                            >
+                              {keyword}
                             </Badge>
                           ))}
                         </div>
-                      </div>
-                    )}
-
-                    {parsedJob.implicit_requirements &&
-                      parsedJob.implicit_requirements.length > 0 && (
-                        <div>
-                          <p className="text-sm text-gray-500 mb-2 flex items-center gap-1">
-                            <Zap className="h-3.5 w-3.5" /> 隐含需求
-                          </p>
-                          <ul className="list-disc list-inside space-y-1 text-sm text-amber-700">
-                            {parsedJob.implicit_requirements.map((requirement) => (
-                              <li key={requirement}>{requirement}</li>
-                            ))}
-                          </ul>
-                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-blue-700">
+                          未解析到技能关键词，可完善职位描述后重新解析
+                        </p>
                       )}
+                      <p className="mt-3 text-xs text-blue-700/80">
+                        快速模式约需 10 秒；开启「深度思考」后 AI 先深度推理 JD 语义再提炼，结果更精准但约需 1-3 分钟
+                      </p>
+                    </div>
+                  </TabsContent>
 
-                    {parsedJob.completeness != null && (
-                      <div>
-                        <p className="text-sm text-gray-500 mb-2">JD完整度</p>
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                parsedJob.completeness >= 80
-                                  ? 'bg-emerald-500'
-                                  : parsedJob.completeness >= 60
-                                    ? 'bg-amber-500'
-                                    : 'bg-red-500'
-                              }`}
-                              style={{ width: `${parsedJob.completeness}%` }}
-                            />
-                          </div>
-                          <span
-                            className={`text-sm font-semibold ${
-                              parsedJob.completeness >= 80
-                                ? 'text-emerald-600'
-                                : parsedJob.completeness >= 60
-                                  ? 'text-amber-600'
-                                  : 'text-red-600'
-                            }`}
-                          >
-                            {parsedJob.completeness}%
-                          </span>
+                  <TabsContent value="talent">
+                    {talentPool ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-900">
+                            <History className="h-4 w-4 shrink-0 text-emerald-700" />
+                            人才池再激活 · {talentPool.candidates.length} 位历史高分候选人命中当前关键词
+                          </p>
+                          {talentPool.candidates.length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0"
+                              onClick={() => setTalentPoolExpanded(value => !value)}
+                            >
+                              {talentPoolExpanded ? '收起' : '展开列表'}
+                            </Button>
+                          )}
                         </div>
+                        {talentPoolLoading && <p className="mt-2 text-xs text-emerald-700">加载中…</p>}
+                        {!talentPoolLoading && talentPool.candidates.length === 0 && (
+                          <p className="mt-2 text-xs text-emerald-700">暂无命中当前技能要求的历史高分候选人</p>
+                        )}
+                        {talentPoolExpanded && (
+                          <div className="mt-3 divide-y divide-emerald-100">
+                            {talentPool.candidates.map(candidate => (
+                              <div key={candidate.candidate_id} className="flex flex-col gap-2 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-medium text-slate-900">{candidate.name}</span>
+                                    <Badge className={`${getScoreBg(candidate.best_score)} ${getScoreColor(candidate.best_score)}`}>
+                                      {candidate.best_score}分
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                                    <span>命中技能：</span>
+                                    {candidate.matched_skills.map(skill => (
+                                      <Badge key={skill} variant="secondary" className="text-xs">{skill}</Badge>
+                                    ))}
+                                    {candidate.last_matched_at && (
+                                      <span className="ml-1">最近匹配：{new Date(candidate.last_matched_at).toLocaleDateString('zh-CN')}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    disabled={creatingOutreachId === candidate.candidate_id}
+                                    onClick={() => void createOutreachTask(candidate)}
+                                  >
+                                    {creatingOutreachId === candidate.candidate_id ? '创建中…' : '创建触达待办'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => router.push(`/matching?jobId=${parsedJob.id}&candidateId=${candidate.candidate_id}`)}
+                                  >
+                                    深度匹配
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs text-slate-500">
+                          {talentPoolLoading ? '正在加载人才池数据…' : '人才池数据加载失败，请稍后重试'}
+                        </p>
                       </div>
                     )}
+                  </TabsContent>
 
-                    {parsedJob.missing_fields &&
-                      parsedJob.missing_fields.length > 0 && (
+                  <TabsContent value="criteria">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        {parsedJob.location && (
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <p className="text-xs text-gray-500 mb-1">工作地点</p>
+                            <p className="font-medium">{parsedJob.location}</p>
+                          </div>
+                        )}
+                        {parsedJob.salary_range && (
+                          <div className="p-3 bg-emerald-50 rounded-lg">
+                            <p className="text-xs text-gray-500 mb-1">薪资范围</p>
+                            <p className="font-medium text-emerald-600">
+                              {parsedJob.salary_range}
+                            </p>
+                          </div>
+                        )}
+                        {parsedJob.experience_required && (
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <p className="text-xs text-gray-500 mb-1">经验要求</p>
+                            <p className="font-medium">
+                              {parsedJob.experience_required}
+                            </p>
+                            {parsedBand && (
+                              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <Badge variant="outline" className="bg-white">
+                                  {parsedBandLabel}
+                                </Badge>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    parsedBand.source === 'explicit'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                                  }
+                                >
+                                  {parsedBand.source === 'explicit' ? 'JD 明确' : 'AI 推断'}
+                                </Badge>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-1.5 text-xs text-blue-600"
+                                  onClick={() => openEditForm(parsedJob)}
+                                >
+                                  <Pencil className="mr-1 h-3 w-3" />
+                                  编辑年限区间
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {parsedJob.education_required && (
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <p className="text-xs text-gray-500 mb-1">学历要求</p>
+                            <p className="font-medium">
+                              {parsedJob.education_required}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {parsedJob.responsibilities &&
+                        parsedJob.responsibilities.length > 0 && (
+                          <div>
+                            <p className="text-sm text-gray-500 mb-2">岗位职责</p>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                              {parsedJob.responsibilities.map((responsibility) => (
+                                <li key={responsibility} className="text-gray-700">
+                                  {responsibility}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                      {parsedJob.benefits && parsedJob.benefits.length > 0 && (
                         <div>
-                          <p className="text-sm text-gray-500 mb-2 flex items-center gap-1">
-                            <AlertCircle className="h-3.5 w-3.5" /> 缺失字段
-                          </p>
+                          <p className="text-sm text-gray-500 mb-2">福利待遇</p>
                           <div className="flex flex-wrap gap-2">
-                            {parsedJob.missing_fields.map((field) => (
+                            {parsedJob.benefits.map((benefit) => (
                               <Badge
-                                key={field}
+                                key={benefit}
                                 variant="outline"
-                                className="bg-red-50 text-red-600 border-red-200"
+                                className="bg-emerald-50 text-emerald-700 border-emerald-200"
                               >
-                                {field}
+                                {benefit}
                               </Badge>
                             ))}
                           </div>
                         </div>
                       )}
 
-                    {parsedJob.urgency && parsedJob.urgency !== 'normal' && (
-                      <div
-                        className={`p-3 rounded-lg ${
-                          parsedJob.urgency === 'urgent'
-                            ? 'bg-red-50 border border-red-200'
-                            : 'bg-amber-50 border border-amber-200'
-                        }`}
-                      >
-                        <p className="text-sm font-medium flex items-center gap-1">
-                          <AlertCircle
-                            className={`h-4 w-4 ${
-                              parsedJob.urgency === 'urgent'
-                                ? 'text-red-500'
-                                : 'text-amber-500'
-                            }`}
-                          />
-                          紧急程度：
-                          {parsedJob.urgency === 'urgent' ? '紧急' : '较急'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      {parsedJob.implicit_requirements &&
+                        parsedJob.implicit_requirements.length > 0 && (
+                          <div>
+                            <p className="text-sm text-gray-500 mb-2 flex items-center gap-1">
+                              <Zap className="h-3.5 w-3.5" /> 隐含需求
+                            </p>
+                            <ul className="list-disc list-inside space-y-1 text-sm text-amber-700">
+                              {parsedJob.implicit_requirements.map((requirement) => (
+                                <li key={requirement}>{requirement}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                      {parsedJob.completeness != null && (
+                        <div>
+                          <p className="text-sm text-gray-500 mb-2">JD完整度</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  parsedJob.completeness >= 80
+                                    ? 'bg-emerald-500'
+                                    : parsedJob.completeness >= 60
+                                      ? 'bg-amber-500'
+                                      : 'bg-red-500'
+                                }`}
+                                style={{ width: `${parsedJob.completeness}%` }}
+                              />
+                            </div>
+                            <span
+                              className={`text-sm font-semibold ${
+                                parsedJob.completeness >= 80
+                                  ? 'text-emerald-600'
+                                  : parsedJob.completeness >= 60
+                                    ? 'text-amber-600'
+                                    : 'text-red-600'
+                              }`}
+                            >
+                              {parsedJob.completeness}%
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {parsedJob.missing_fields &&
+                        parsedJob.missing_fields.length > 0 && (
+                          <div>
+                            <p className="text-sm text-gray-500 mb-2 flex items-center gap-1">
+                              <AlertCircle className="h-3.5 w-3.5" /> 缺失字段
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {parsedJob.missing_fields.map((field) => (
+                                <Badge
+                                  key={field}
+                                  variant="outline"
+                                  className="bg-red-50 text-red-600 border-red-200"
+                                >
+                                  {field}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                      {parsedJob.urgency && parsedJob.urgency !== 'normal' && (
+                        <div
+                          className={`p-3 rounded-lg ${
+                            parsedJob.urgency === 'urgent'
+                              ? 'bg-red-50 border border-red-200'
+                              : 'bg-amber-50 border border-amber-200'
+                          }`}
+                        >
+                          <p className="text-sm font-medium flex items-center gap-1">
+                            <AlertCircle
+                              className={`h-4 w-4 ${
+                                parsedJob.urgency === 'urgent'
+                                  ? 'text-red-500'
+                                  : 'text-amber-500'
+                              }`}
+                            />
+                            紧急程度：
+                            {parsedJob.urgency === 'urgent' ? '紧急' : '较急'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </TabsContent>
+                  </Tabs>
+                </div>
               </div>
-            ) : (
+            ) : jdLoading ? null : (
               <div className="h-[300px] flex flex-col items-center justify-center text-gray-400">
                 <FileText className="h-16 w-16 mb-4 text-gray-200" />
                 <p>解析结果将在这里显示</p>
@@ -1179,157 +1510,40 @@ export function JobWorkspace() {
         </Card>
       </div>
 
-      {autoMatchSummary && autoMatchSummary.matches.length > 0 && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Award className="h-5 w-5 text-blue-600" />
-                匹配结果 · {autoMatchSummary.jobTitle}
-              </CardTitle>
-              <CardDescription>
-                按综合分排序的候选人，评分依据即解析出的技能/经验/学历/薪资标准；可进入短名单做人工决策
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push('/shortlists')}
-            >
-              查看短名单
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {autoMatchSummary.matches.map((match, index) => {
-                const candidate = candidates.find(
-                  (item) => item.id === match.candidate_id,
-                );
-                return (
-                  <div
-                    key={match.candidate_id}
-                    className={`rounded-xl border p-3 ${getScoreBg(match.overall_score || 0)}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">
-                        No.{match.rank ?? index + 1}
-                      </span>
-                      <span className={`text-xl font-bold ${getScoreColor(match.overall_score || 0)}`}>
-                        {match.overall_score}
-                      </span>
-                    </div>
-                    <p className="mt-1 truncate text-sm font-medium text-gray-900">
-                      {candidate?.name ?? '未知候选人'}
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      {match.recommendation_band
-                        ? BAND_LABELS[match.recommendation_band]
-                        : getScoreLabel(match.overall_score || 0)}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-2 w-full"
-                      onClick={() => router.push(`/matching?jobId=${autoMatchSummary.jobId}&candidateId=${match.candidate_id}`)}
-                    >
-                      深度匹配
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>职位库</CardTitle>
-            <CardDescription>已解析的职位列表 · 点击职位卡片可回填并编辑职位描述</CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="搜索职位..."
-                className="pl-9 w-48"
-                value={jobSearch}
-                onChange={(event) => setJobSearch(event.target.value)}
-              />
-            </div>
-            <Button onClick={openCreateForm}>
-              <Plus className="h-4 w-4 mr-1" />
-              新增职位
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {filteredJobs.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredJobs.map((job) => (
-                <Card
-                  key={job.id}
-                  className="hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => handleSelectJob(job)}
-                  title="点击回填职位描述"
-                >
-                  <CardContent className="pt-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <h4 className="font-semibold text-gray-900">{job.title}</h4>
-                      {job.salary_range && (
-                        <Badge className="bg-emerald-50 text-emerald-700">
-                          {job.salary_range}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-1 text-sm text-gray-500">
-                      <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline">{job.status === 'active' ? '已启用' : job.status === 'closed' ? '已关闭' : '草稿'}</Badge><div className="flex flex-wrap gap-2">{job.status === 'active' && <Button size="sm" onClick={(event) => { event.stopPropagation(); void generateShortlist(job.id); }} disabled={generatingJobId === job.id}>{generatingJobId === job.id ? '提交中…' : '生成短名单'}</Button>}{job.status === 'active' ? <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); void updateJobLifecycle(job.id, 'close'); }}>关闭职位</Button> : <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); void updateJobLifecycle(job.id, 'activate'); }}>启用职位</Button>}<Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); openEditForm(job); }}><Pencil className="h-3.5 w-3.5" />编辑</Button><Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" onClick={(event) => { event.stopPropagation(); setDeletingJob(job); }}><Trash2 className="h-3.5 w-3.5" />删除</Button></div></div>
-                      {job.department && <p>部门：{job.department}</p>}
-                      {job.location && <p>地点：{job.location}</p>}
-                      {job.skills_required && job.skills_required.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {job.skills_required.slice(0, 3).map((skill) => (
-                            <Badge
-                              key={skill}
-                              variant="secondary"
-                              className="text-xs"
-                            >
-                              {skill}
-                            </Badge>
-                          ))}
-                          {job.skills_required.length > 3 && (
-                            <Badge variant="secondary" className="text-xs">
-                              +{job.skills_required.length - 3}
-                            </Badge>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              {jobSearch ? (
-                '未找到匹配的职位'
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <Target className="h-4 w-4" />
-                  暂无职位，可点击“新增职位”或解析JD
-                </span>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       <JobFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
         job={formJob}
         onSaved={reloadJobs}
+      />
+
+      <input
+        ref={importFileInputRef}
+        type="file"
+        accept=".pdf,.docx,.doc,.txt,.md"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files || []);
+          if (files.length > 0) {
+            setImportCandidateFiles(files);
+            setImportCandidateOpen(true);
+          }
+          event.target.value = '';
+        }}
+      />
+      <ImportPreviewDialog
+        open={importCandidateOpen}
+        onOpenChange={(open) => {
+          setImportCandidateOpen(open);
+          if (!open) {
+            setImportCandidateJobId(null);
+            setImportCandidateFiles([]);
+          }
+        }}
+        files={importCandidateFiles}
+        lockedJobId={importCandidateJobId}
+        onImported={reloadCandidates}
       />
 
       <AlertDialog

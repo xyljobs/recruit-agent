@@ -19,6 +19,8 @@ export interface CompletionOptions {
   model?: string;
   temperature?: number;
   responseFormat?: OpenAI.Chat.Completions.ChatCompletionCreateParams['response_format'];
+  /** 关闭思考模型的隐式推理（qwen enable_thinking），结构化抽取类任务可大幅降低首 token 延迟 */
+  enableThinking?: boolean;
   thinking?: unknown;
   caching?: unknown;
   streaming?: unknown;
@@ -98,10 +100,7 @@ export class LLMClient {
     options: CompletionOptions = {},
   ): AsyncGenerator<{ content: string }> {
     const response = await this.client.chat.completions.create({
-      model: options.model ?? process.env.LLM_MODEL ?? DEFAULT_MODEL,
-      messages: toOpenAiMessages(messages),
-      temperature: options.temperature,
-      response_format: options.responseFormat,
+      ...this.buildCompletionParams(messages, options),
       stream: true,
     });
 
@@ -117,13 +116,27 @@ export class LLMClient {
     messages: ChatMessage[],
     options: CompletionOptions = {},
   ): Promise<{ content: string }> {
-    const response = await this.client.chat.completions.create({
+    const response = await this.client.chat.completions.create(
+      this.buildCompletionParams(messages, options),
+    );
+
+    return { content: response.choices[0]?.message.content ?? '' };
+  }
+
+  private buildCompletionParams(
+    messages: ChatMessage[],
+    options: CompletionOptions,
+  ): Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'stream'> {
+    const params: Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'stream'> = {
       model: options.model ?? process.env.LLM_MODEL ?? DEFAULT_MODEL,
       messages: toOpenAiMessages(messages),
       temperature: options.temperature,
       response_format: options.responseFormat,
-    });
-
-    return { content: response.choices[0]?.message.content ?? '' };
+    };
+    // qwen 思考模型默认会先生成大量隐式推理 token；结构化抽取类任务显式关闭
+    if (options.enableThinking === false) {
+      return Object.assign(params, { enable_thinking: false });
+    }
+    return params;
   }
 }

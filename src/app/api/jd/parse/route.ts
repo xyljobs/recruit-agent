@@ -5,6 +5,7 @@ import { getTenantRequestContext } from '@/lib/auth-server';
 import { JD_JSON_BODY_LIMIT, jdParseBodySchema, parseLimitedJson } from '@/lib/api-limits';
 import { apiErrorResponse } from '@/lib/api-response';
 import { parseExperienceBand } from '@/lib/matching/screening-rubric';
+import { normalizeSearchKeywords } from '@/lib/matching/search-keywords';
 import { enforceRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 
 const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职位描述(JD)并提取关键信息。
@@ -22,8 +23,12 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
 ## 技能要求（关键字段）
 7. 必需技能 (skills_required) - 数组格式，JD明确要求的技能
 8. 加分技能 (bonus_skills) - 数组格式，JD中提到"优先"、"加分"、"最好有"的技能
-9. 搜索关键词 (search_keywords) - 数组格式，6-10 个用于在招聘平台搜索人才的精炼关键词
-    要求：包含职位别名（如"Java后端"→"后端工程师"、"Java开发工程师"）、核心技术词与同义词；每个关键词 2-10 字；不得包含"熟悉/精通/3年以上/经验/优先"等描述性语句
+9. 搜索关键词 (search_keywords) - 数组格式，6-10 个可直接用于在招聘平台搜索人才的关键词，按以下构成与口径输出：
+    ① 职位词放最前：职位名称本身 + 1-2 个行业通用别名（如"Java后端"→"Java后端开发"、"后端工程师"）
+    ② 硬技能词：JD 原文中明确出现的具体技术名词（语言/框架/工具/平台/协议，如 React、PLC、PROFINET）
+    准确性红线：
+    - 不得捏造 JD 未提及的技术词；不得放入"性能优化/架构设计/团队管理/沟通能力"等描述性能力短语（平台搜索噪音极大）
+    - 不得包含"熟悉/精通/N年以上/经验/优先"等修饰语；每个关键词 2-10 字
 
 ## 岗位详情
 10. 岗位职责 (responsibilities) - 数组格式
@@ -58,7 +63,7 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
   "education_required": "学历要求",
   "skills_required": ["必需技能1", "必需技能2"],
   "bonus_skills": ["加分技能1", "加分技能2"],
-  "search_keywords": ["Java", "后端工程师", "Spring Boot", "MySQL", "Redis", "微服务"],
+  "search_keywords": ["Java后端开发", "后端工程师", "Java", "Spring Boot", "MySQL", "Redis", "Kafka"],
   "responsibilities": ["职责1", "职责2"],
   "benefits": ["福利1", "福利2"],
   "urgency": "normal",
@@ -74,11 +79,23 @@ const JD_PARSE_PROMPT = `你是一个专业的HR招聘助手，擅长解析职�
 - 隐含需求要基于行业经验合理推断，不要过度解读
 - 完整度评估标准：基础信息完整50% + 技能要求完整20% + 职责清晰20% + 薪资福利10%
 
+输出纪律（务必遵守，控制输出篇幅）：
+- responsibilities：最多 6 条，每条不超过 30 字，概括改写，禁止逐字复制原文
+- benefits：最多 6 条，每条不超过 15 字
+- implicit_requirements：最多 3 条，每条不超过 30 字
+- skills_required / bonus_skills：只保留具体技术名词，每项 2-12 字
+- missing_fields：最多 4 项
+- 只输出 JSON 本身，不要输出任何解释、前言或代码块标记
+
 JD内容：
 `;
 
+/** 解析流空闲超时：超过该时间未收到新分片即中止，避免请求永久挂起 */
+const PARSE_STREAM_IDLE_TIMEOUT_MS = 30_000;
+
 export async function POST(request: NextRequest) {
   try {
+    const startedAt = Date.now();
     const { supabase, user } = await getTenantRequestContext(request);
     await enforceRateLimit(supabase, RATE_LIMITS.jdParse);
     const { jdContent, jobId } = await parseLimitedJson(
@@ -94,130 +111,137 @@ export async function POST(request: NextRequest) {
     );
     aiGateway.requireModel();
 
-    // 使用流式输出解析JD
+    // 使用流式输出解析JD，NDJSON 逐分片回传，前端渐进展示生成过程
     const prompt = JD_PARSE_PROMPT + jdContent;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enqueueLine = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        };
+        // 立即下发 start 事件，让前端第一时间收到响应体，确认链路未被缓冲
+        enqueueLine({ type: 'start' });
+        let fullResponse = '';
+        let firstChunkAt: number | null = null;
+        try {
+          const chunks = withIdleTimeout(
+            aiGateway.stream([{ role: 'user' as const, content: prompt }], {
+              model: aiGateway.policy.modelName ?? undefined,
+              temperature: 0.3,
+              // JD 解析是结构化抽取任务，关闭思考模型的隐式推理，避免分钟级首 token 延迟
+              enableThinking: false,
+            }),
+            PARSE_STREAM_IDLE_TIMEOUT_MS,
+          );
+          for await (const chunk of chunks) {
+            if (!chunk.content) continue;
+            const text = chunk.content.toString();
+            if (firstChunkAt === null) {
+              firstChunkAt = Date.now();
+              console.info(`[jd/parse] 首字耗时 ${firstChunkAt - startedAt}ms`);
+            }
+            fullResponse += text;
+            enqueueLine({ type: 'delta', text });
+          }
 
-    const messages = [
-      { role: 'user' as const, content: prompt }
-    ];
+          // 解析JSON响应
+          const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error('无法从响应中提取JSON');
+          const parsedResult = JSON.parse(jsonMatch[0]);
 
-    let fullResponse = '';
-    const stream = aiGateway.stream(messages, {
-      model: aiGateway.policy.modelName ?? undefined,
-      temperature: 0.3,
-    });
+          // 保存到数据库（传入 jobId 时更新已有职位，否则新建）
+          // 年限区间口径（计划 §4.2/§4.4）：hard_max_enabled 由服务端按 JD 原文重算，
+          // 不信任 LLM 输出的 source；仅当 JD 年限表述含上限语义（以内/不超过/上限/最多）才启用硬门槛。
+          const screeningRubric = buildScreeningRubric(
+            parsedResult.experience_band,
+            parsedResult.experience_required,
+            jdContent,
+          );
+          const parsedFields = {
+            title: parsedResult.title || '未命名职位',
+            department: parsedResult.department,
+            location: parsedResult.location,
+            salary_range: parsedResult.salary_range,
+            salary_min: parsedResult.salary_min || null,
+            salary_max: parsedResult.salary_max || null,
+            experience_required: parsedResult.experience_required,
+            education_required: parsedResult.education_required,
+            skills_required: parsedResult.skills_required || [],
+            bonus_skills: parsedResult.bonus_skills || [],
+            search_keywords: [] as string[],
+            responsibilities: parsedResult.responsibilities,
+            benefits: parsedResult.benefits,
+            urgency: parsedResult.urgency || 'normal',
+            implicit_requirements: parsedResult.implicit_requirements || [],
+            completeness: parsedResult.completeness || null,
+            missing_fields: parsedResult.missing_fields || [],
+            raw_jd: jdContent,
+            // 用人标准已更新，旧的发布版描述随之过时：清空缓存，前端解析完成后自动重新生成并持久化
+            publish_jd: null,
+            screening_rubric: screeningRubric,
+          };
+          // 关键词归一化：职位名置首 + 去噪去重，持久化后列表选中与解析当次展示一致
+          parsedFields.search_keywords = normalizeSearchKeywords(
+            parsedResult.search_keywords,
+            parsedFields.title,
+          );
 
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        fullResponse += chunk.content.toString();
-      }
-    }
+          const saved = jobId
+            ? await supabase
+              .from('job_requirements')
+              .update({ ...parsedFields, updated_at: new Date().toISOString() })
+              .eq('id', jobId)
+              .eq('organization_id', user.organizationId)
+              .select()
+              .single()
+            : await supabase
+              .from('job_requirements')
+              .insert({
+                organization_id: user.organizationId,
+                owner_user_id: user.userId,
+                ...parsedFields,
+                status: 'active',
+                activated_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
 
-    // 解析JSON响应
-    let parsedResult;
-    try {
-      // 提取JSON部分（去除可能的markdown代码块）
-      const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedResult = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('无法从响应中提取JSON');
-      }
-    } catch {
-      console.error('JD解析失败，原始响应:', fullResponse);
-      return NextResponse.json(
-        { error: 'JD解析失败，请检查JD格式' },
-        { status: 500 }
-      );
-    }
+          if (saved.error || !saved.data) {
+            console.error('保存JD失败:', saved.error);
+            enqueueLine({
+              type: 'error',
+              error: jobId ? '更新职位失败，该职位可能已不存在' : '保存JD失败',
+            });
+            controller.close();
+            return;
+          }
 
-    // 保存到数据库（传入 jobId 时更新已有职位，否则新建）
-    // 年限区间口径（计划 §4.2/§4.4）：hard_max_enabled 由服务端按 JD 原文重算，
-    // 不信任 LLM 输出的 source；仅当 JD 年限表述含上限语义（以内/不超过/上限/最多）才启用硬门槛。
-    const screeningRubric = buildScreeningRubric(
-      parsedResult.experience_band,
-      parsedResult.experience_required,
-      jdContent,
-    );
-    const parsedFields = {
-      title: parsedResult.title || '未命名职位',
-      department: parsedResult.department,
-      location: parsedResult.location,
-      salary_range: parsedResult.salary_range,
-      salary_min: parsedResult.salary_min || null,
-      salary_max: parsedResult.salary_max || null,
-      experience_required: parsedResult.experience_required,
-      education_required: parsedResult.education_required,
-      skills_required: parsedResult.skills_required || [],
-      bonus_skills: parsedResult.bonus_skills || [],
-      responsibilities: parsedResult.responsibilities,
-      benefits: parsedResult.benefits,
-      urgency: parsedResult.urgency || 'normal',
-      implicit_requirements: parsedResult.implicit_requirements || [],
-      completeness: parsedResult.completeness || null,
-      missing_fields: parsedResult.missing_fields || [],
-      raw_jd: jdContent,
-      screening_rubric: screeningRubric,
-    };
-
-    if (jobId) {
-      const { data, error } = await supabase
-        .from('job_requirements')
-        .update({ ...parsedFields, updated_at: new Date().toISOString() })
-        .eq('id', jobId)
-        .eq('organization_id', user.organizationId)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('更新JD失败:', error);
-        return NextResponse.json(
-          { error: '更新职位失败，该职位可能已不存在' },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          id: data.id,
-          ...parsedResult,
-          screening_rubric: screeningRubric,
-          created_at: data.created_at,
+          console.info(`[jd/parse] 解析完成，总耗时 ${Date.now() - startedAt}ms，${fullResponse.length} 字`);
+          enqueueLine({
+            type: 'done',
+            data: {
+              id: saved.data.id,
+              ...parsedResult,
+              search_keywords: parsedFields.search_keywords,
+              screening_rubric: screeningRubric,
+              publish_jd: null,
+              created_at: saved.data.created_at,
+            },
+          });
+          controller.close();
+        } catch (streamError) {
+          console.error('JD解析流式处理失败:', streamError);
+          enqueueLine({ type: 'error', error: 'JD解析失败，请检查JD格式后重试' });
+          controller.close();
         }
-      });
-    }
-
-    const { data, error } = await supabase
-      .from('job_requirements')
-      .insert({
-        organization_id: user.organizationId,
-        owner_user_id: user.userId,
-        ...parsedFields,
-        status: 'active',
-        activated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('保存JD失败:', error);
-      return NextResponse.json(
-        { error: '保存JD失败' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: data.id,
-        ...parsedResult,
-        screening_rubric: screeningRubric,
-        created_at: data.created_at,
-      }
+      },
     });
-
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+      },
+    });
   } catch (error) {
     console.error('JD解析API错误:', error);
     if (error instanceof AiExecutionPolicyError) {
@@ -227,6 +251,41 @@ export async function POST(request: NextRequest) {
       );
     }
     return apiErrorResponse(error, '服务器内部错误');
+  }
+}
+
+/** 为异步分片流增加空闲超时：超时未产出新分片则抛出错误，避免请求永久挂起 */
+async function* withIdleTimeout<T>(
+  generator: AsyncGenerator<T>,
+  idleTimeoutMs: number,
+): AsyncGenerator<T> {
+  const active: { timer?: ReturnType<typeof setTimeout> } = {};
+  const nextWithTimeout = (): Promise<IteratorResult<T>> =>
+    new Promise<IteratorResult<T>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('解析超时'));
+        void generator.return(undefined).catch(() => undefined);
+      }, idleTimeoutMs);
+      active.timer = timer;
+      generator.next().then(
+        (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error('模型调用失败'));
+        },
+      );
+    });
+  try {
+    while (true) {
+      const result = await nextWithTimeout();
+      if (result.done) return;
+      yield result.value;
+    }
+  } finally {
+    if (active.timer) clearTimeout(active.timer);
   }
 }
 

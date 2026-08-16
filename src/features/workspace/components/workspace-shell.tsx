@@ -12,7 +12,6 @@ import {
   ShieldCheck,
   User,
   UserCog,
-  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +26,7 @@ import type { WorkspaceUser } from '../types';
 // 招聘决策流程步骤：按业务先后顺序串联展示
 const FLOW_STEPS = [
   { href: '/jobs', label: '职位与标准', desc: 'JD 解析 · 定标准' },
+  { href: '/candidates', label: '候选人库', desc: '简历入库 · 绑定职位' },
   { href: '/shortlists', label: '候选人短名单', desc: '智能匹配 · 人工决策' },
   { href: '/outcomes', label: '沟通与结果', desc: '话术 · 触达 · 复盘' },
   { href: '/analytics', label: '决策看板', desc: '指标 · 校准' },
@@ -34,7 +34,6 @@ const FLOW_STEPS = [
 
 // 配置类入口，不属于业务流程，独立放在右侧
 const CONFIG_NAV_ITEMS = [
-  { href: '/candidates', label: '候选人库', icon: Users },
   { href: '/interview-bank', label: '面试题库', icon: Library },
   { href: '/data-sources', label: '数据源', icon: Database },
 ] as const;
@@ -50,6 +49,19 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<WorkspaceUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
 
+  // 会话失效时必须同时清除 HttpOnly cookie：仅清 sessionStorage 的话，
+  // proxy 的 /login 已登录守卫仍会判定已登录并把登录页 307 弹回工作区，
+  // 与 /api/auth/me 的 401 形成重定向死循环（页面永久"加载中"）。
+  // logout 接口在任何情况下都会清除 cookie，失败也不阻断跳转登录页。
+  const clearLocalSession = useCallback(async () => {
+    try {
+      await authFetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // 登出接口不可用时仍清除本地 token，由用户重新认证
+    }
+    clearAuthToken();
+  }, []);
+
   const loadUser = useCallback(async () => {
     try {
       const response = await authFetch('/api/auth/me');
@@ -61,15 +73,16 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         }
         setUser(result.data);
       } else {
-        clearAuthToken();
+        await clearLocalSession();
         router.push('/login');
       }
     } catch {
+      await clearLocalSession();
       router.push('/login');
     } finally {
       setUserLoading(false);
     }
-  }, [router]);
+  }, [router, clearLocalSession]);
 
   useEffect(() => {
     void loadUser();
@@ -114,18 +127,18 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-gray-50">
         <div className="sticky top-0 z-50 bg-white shadow-sm">
         <header className="border-b">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <Link href="/analytics" className="flex items-center gap-3">
-              <BrandLogo className="h-10 w-10 drop-shadow-lg drop-shadow-blue-500/30" />
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">人才决策Agent</h1>
-                <p className="hidden text-xs text-gray-500 sm:block">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3">
+            <Link href="/analytics" className="flex min-w-0 items-center gap-3">
+              <BrandLogo className="h-10 w-10 shrink-0 drop-shadow-lg drop-shadow-blue-500/30" />
+              <div className="min-w-0">
+                <h1 className="truncate text-xl font-bold text-gray-900">人才决策Agent</h1>
+                <p className="hidden text-xs text-gray-500 lg:block">
                   企业私有部署的招聘决策副驾驶
                 </p>
               </div>
             </Link>
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary" className="hidden border-blue-200 bg-blue-50 text-blue-700 sm:flex">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <Badge variant="secondary" className="hidden border-blue-200 bg-blue-50 text-blue-700 xl:flex">
                 人工决策优先
               </Badge>
               {user.organizations && user.organizations.length > 0 && (
@@ -136,7 +149,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                   <SelectTrigger
                     aria-label="当前组织，可切换"
                     title="当前组织（租户），点击切换"
-                    className="h-9 w-auto max-w-52 gap-2 border-slate-200 bg-white"
+                    className="h-9 w-auto min-w-0 max-w-40 gap-2 border-slate-200 bg-white sm:max-w-52"
                   >
                     <Building2 className="h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
                     <SelectValue placeholder={user.company || '选择组织'} />
@@ -152,13 +165,13 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                 </Select>
               )}
               {user && (
-                <div className="flex items-center gap-2 pl-3 border-l">
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <div className="flex min-w-0 items-center gap-2 border-l pl-2 sm:pl-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100">
                     <User className="h-4 w-4 text-blue-600" />
                   </div>
-                  <div className="hidden sm:block">
-                    <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                    <p className="text-xs text-gray-500">
+                  <div className="hidden min-w-0 lg:block">
+                    <p className="truncate text-sm font-medium text-gray-900">{user.name}</p>
+                    <p className="truncate text-xs text-gray-500">
                       {user.email}
                     </p>
                   </div>
@@ -188,15 +201,15 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
         <nav
           aria-label="招聘决策流程"
-          className="max-w-7xl mx-auto overflow-x-auto px-4 py-3"
+          className="px-6 py-3"
         >
-          <div className="flex min-w-max items-stretch gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-stretch gap-2 sm:gap-3">
             {FLOW_STEPS.map((step, index) => {
               const isActive = pathname === step.href;
               return (
                 <Fragment key={step.href}>
                   {index > 0 && (
-                    <div aria-hidden="true" className="flex items-center">
+                    <div aria-hidden="true" className="hidden items-center lg:flex">
                       <div className="h-px w-4 bg-gray-300 sm:w-8" />
                       <ChevronRight className="-ml-1 h-4 w-4 text-gray-300" />
                     </div>
@@ -206,7 +219,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                     aria-label={`流程第 ${index + 1} 步：${step.label}`}
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
-                      'group flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors',
+                      'group flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors sm:gap-2.5 sm:px-3',
                       isActive
                         ? 'border-blue-200 bg-blue-50 shadow-sm'
                         : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50',
@@ -222,10 +235,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                     >
                       {index + 1}
                     </span>
-                    <span className="flex flex-col">
+                    <span className="flex min-w-0 flex-col">
                       <span
                         className={cn(
-                          'text-sm font-medium leading-tight',
+                          'truncate text-sm font-medium leading-tight',
                           isActive ? 'text-blue-700' : 'text-gray-800',
                         )}
                       >
@@ -233,7 +246,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                       </span>
                       <span
                         className={cn(
-                          'text-[11px] leading-tight',
+                          'hidden text-[11px] leading-tight lg:block',
                           isActive ? 'text-blue-500' : 'text-gray-400',
                         )}
                       >
@@ -245,7 +258,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               );
             })}
 
-            <div className="ml-1 flex items-center gap-1 border-l border-gray-200 pl-3 sm:ml-2">
+            <div className="ml-1 flex items-center gap-1 border-l border-gray-200 pl-2 sm:ml-2 sm:pl-3">
               {[...CONFIG_NAV_ITEMS, ...(user.role === 'admin' ? ADMIN_NAV_ITEMS : [])].map((item) => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;
@@ -272,9 +285,14 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         </nav>
         </div>
 
-        <main className="max-w-7xl mx-auto px-4 py-6">
+        <main className="px-6 py-6 pb-12">
           {children}
         </main>
+
+        {/* 贴底 footer，与登录页保持一致 */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 text-center py-2 text-xs text-[#999] bg-white/80">
+          © 卓越际联科技有限公司&nbsp;&nbsp;SINCE 2026
+        </div>
       </div>
     </WorkspaceDataProvider>
   );
